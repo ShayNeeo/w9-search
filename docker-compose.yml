@@ -5,14 +5,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.build
-    container_name: w9-search
     restart: unless-stopped
     ports:
       - "${PORT:-3000}:3000"
     environment:
       - DATABASE_URL=sqlite:/app/data/w9_search.db
       - SEARXNG_BASE_URL=http://searxng:8080
-      # Add other keys from .env here or use env_file
     env_file:
       - .env
     volumes:
@@ -33,6 +31,11 @@ services:
     ports:
       - "${SEARXNG_PORT:-8080}:8080"
     volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - BASE_URL=http://localhost:8080/
+      - INSTANCE_NAME=w9-searxng
+      - SEARXNG_SECRET=${SEARXNG_SECRET}
 
 networks:
   w9-network:
