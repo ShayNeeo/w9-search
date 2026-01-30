@@ -1,7 +1,7 @@
 # Default SearXNG settings
 use_default_settings: true
 server:
-  secret_key: "ultrasecretkey" # Change this!
+  secret_key: "ultrasecretkey" # Overridden by SEARXNG_SECRET env var
   limiter: false
   image_proxy: true
   bind_address: "0.0.0.0"

@@ -1,15 +1,20 @@
-use axum::response::Html;
+use axum::{extract::State, response::Html};
 use maud::{html, Markup, DOCTYPE};
+use crate::AppState;
 
-pub async fn index() -> Html<String> {
-    // Read available models from environment for frontend selection
-    let models_env = std::env::var("OPENROUTER_MODELS")
-        .unwrap_or_else(|_| "tngtech/deepseek-r1t2-chimera:free,arcee-ai/trinity-large-preview:free".to_string());
-    let models: Vec<String> = models_env
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
+pub async fn index(State(state): State<AppState>) -> Html<String> {
+    // Fetch models dynamically from LLMManager
+    let mut models = state.llm_manager.get_models().await;
+    
+    // Sort models by provider, then name
+    models.sort_by(|a, b| {
+        let provider_cmp = a.provider.as_str().cmp(b.provider.as_str());
+        if provider_cmp == std::cmp::Ordering::Equal {
+            a.name.cmp(&b.name)
+        } else {
+            provider_cmp
+        }
+    });
 
     let markup: Markup = html! {
         (DOCTYPE)
@@ -59,10 +64,12 @@ pub async fn index() -> Html<String> {
                                         label for="model-select" { "Model" }
                                         select id="model-select" name="model" {
                                             @for model in &models {
-                                                option value=(model) { (model) }
+                                                option value=(model.id) { (format!("{} ({})", model.name, model.provider)) }
                                             }
                                         }
                                     }
+                                    
+                                    button type="button" id="sync-btn" class="secondary-btn" { "Sync Limits" }
                                     
                                     button type="submit" class="submit-btn" {
                                         "Query"
@@ -142,6 +149,26 @@ pub async fn index() -> Html<String> {
                             }
                         });
                     }
+                    
+                    document.getElementById('sync-btn').addEventListener('click', async () => {
+                        const btn = document.getElementById('sync-btn');
+                        btn.disabled = true;
+                        btn.textContent = 'Syncing...';
+                        try {
+                            const response = await fetch('/api/sync', { method: 'POST' });
+                            if (response.ok) {
+                                btn.textContent = 'Synced!';
+                                setTimeout(() => { btn.textContent = 'Sync Limits'; btn.disabled = false; }, 2000);
+                            } else {
+                                btn.textContent = 'Failed';
+                                setTimeout(() => { btn.textContent = 'Sync Limits'; btn.disabled = false; }, 2000);
+                            }
+                        } catch (e) {
+                            console.error(e);
+                            btn.textContent = 'Error';
+                            setTimeout(() => { btn.textContent = 'Sync Limits'; btn.disabled = false; }, 2000);
+                        }
+                    });
                     
                     document.getElementById('query-form').addEventListener('submit', async (e) => {
                         e.preventDefault();

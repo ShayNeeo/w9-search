@@ -181,6 +181,7 @@ async fn run() -> anyhow::Result<()> {
         .route("/health", get(health_check))
         .route("/api/query", post(api::handle_query))
         .route("/api/sources", get(api::get_sources))
+        .route("/api/sync", post(api::sync_limits))
         .nest_service("/static", ServeDir::new("static"))
         .layer(CorsLayer::permissive())
         .with_state(state);

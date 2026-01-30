@@ -2,6 +2,7 @@ use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use crate::models::{QueryRequest, QueryResponse};
 use crate::rag::RAGSystem;
 use crate::AppState;
+use crate::search::WebSearch;
 
 pub async fn handle_query(
     State(state): State<AppState>,
@@ -62,6 +63,18 @@ pub async fn get_sources(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Error: {}", e),
             ))
+        }
+    }
+}
+
+pub async fn sync_limits(
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    match WebSearch::sync_tavily_usage(&state.db).await {
+        Ok(_) => StatusCode::OK,
+        Err(e) => {
+            tracing::error!("Sync limits error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
         }
     }
 }
