@@ -42,8 +42,12 @@ COPY --from=builder /app/target/release/w9-search /app/w9-search
 # Copy static files
 COPY static ./static
 
-# Create directory for database
-RUN mkdir -p /app/data
+# Create directory for database with proper permissions
+# Note: If using Dokploy volume mounts, ensure the mounted volume is writable
+RUN mkdir -p /app/data && chmod 755 /app/data
+
+# Ensure static directory exists
+RUN mkdir -p /app/static
 
 # Expose port
 EXPOSE 3000
@@ -51,9 +55,6 @@ EXPOSE 3000
 # Set environment variables
 ENV RUST_LOG=info
 ENV DATABASE_URL=sqlite:/app/data/w9_search.db
-
-# Ensure static directory exists
-RUN mkdir -p /app/static
 
 # Run the application with explicit error handling
 # Use exec form to ensure proper signal handling
