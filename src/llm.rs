@@ -411,10 +411,11 @@ impl LLMManager {
                     "tools": tools
                 });
                 
+                let port = std::env::var("PORT").unwrap_or_else(|_| "3000".to_string());
                 let resp = client.post("https://openrouter.ai/api/v1/chat/completions")
                     .header("Authorization", format!("Bearer {}", key))
                     .header("Content-Type", "application/json")
-                    .header("HTTP-Referer", "http://localhost:3000")
+                    .header("HTTP-Referer", format!("http://localhost:{}", port))
                     .header("X-Title", "W9 Search")
                     .json(&request)
                     .send()
