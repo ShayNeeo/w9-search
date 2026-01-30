@@ -675,3 +675,46 @@ select:focus {
     margin-bottom: 0.2rem;
     display: block;
 }
+
+/* Thinking Process Section */
+.thinking-section {
+    margin-bottom: 2rem;
+    padding: 1.5rem;
+    background: var(--surface);
+    border: 1px dashed var(--border);
+}
+
+.thinking-section h3 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.9rem;
+    color: #888;
+    margin-bottom: 1rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+}
+
+.thinking-steps {
+    max-height: 200px;
+    overflow-y: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.thinking-step {
+    color: #aaa;
+    padding-left: 1rem;
+    border-left: 2px solid var(--border);
+}
+
+.thinking-step:last-child {
+    color: var(--accent-alt);
+    border-left-color: var(--accent-alt);
+    animation: blink 1s infinite;
+}
+
+@keyframes blink {
+    50% { opacity: 0.5; }
+}

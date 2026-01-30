@@ -6,12 +6,23 @@ use anyhow::Result;
 use std::sync::Arc;
 use serde_json::{json, Value};
 use std::collections::HashSet;
+use tokio::sync::mpsc::Sender;
 
 pub struct RAGSystem {
     db: Arc<Database>,
     llm_manager: Arc<LLMManager>,
     model: String,
     search_provider: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(tag = "type", content = "data")]
+pub enum StreamEvent {
+    Status(String),
+    Source(crate::models::Source),
+    Answer(String),
+    Error(String),
+    Done,
 }
 
 impl RAGSystem {
@@ -21,6 +32,12 @@ impl RAGSystem {
             llm_manager,
             model,
             search_provider,
+        }
+    }
+
+    async fn send_status(&self, sender: &Option<Sender<Result<StreamEvent, anyhow::Error>>>, message: impl Into<String>) {
+        if let Some(tx) = sender {
+            let _ = tx.send(Ok(StreamEvent::Status(message.into()))).await;
         }
     }
 
@@ -110,12 +127,21 @@ impl RAGSystem {
         }
     }
 
-    pub async fn query(&self, user_query: &str, web_search_enabled: bool) -> Result<(String, Vec<crate::models::Source>)> {
+    pub async fn query(
+        &self, 
+        user_query: &str, 
+        web_search_enabled: bool,
+        status_sender: Option<Sender<Result<StreamEvent, anyhow::Error>>>
+    ) -> Result<(String, Vec<crate::models::Source>)> {
         tracing::info!("Starting RAG query: '{}' (web_search: {})", user_query, web_search_enabled);
+        self.send_status(&status_sender, "Initializing search...").await;
+        
         let mut context_sources = Vec::new();
         
         // Step 1: Web search if enabled
         if web_search_enabled {
+            self.send_status(&status_sender, "Planning research strategy...").await;
+            
             // Get search plan
             let search_queries = match self.plan_search(user_query).await {
                 Ok(queries) => queries,
@@ -124,12 +150,15 @@ impl RAGSystem {
                     vec![Self::enhance_query_with_temporal_context(user_query)]
                 }
             };
+            
+            self.send_status(&status_sender, format!("Identified {} search queries", search_queries.len())).await;
 
             // Execute searches
             let mut all_results = Vec::new();
             let mut seen_urls = HashSet::new();
             
             for query in search_queries {
+                self.send_status(&status_sender, format!("Searching: {}", query)).await;
                 tracing::info!("Executing search step: {}", query);
                 if let Ok(results) = WebSearch::search(&self.db, &query, self.search_provider.as_deref()).await {
                     for result in results {
@@ -140,9 +169,12 @@ impl RAGSystem {
                 }
             }
             
+            self.send_status(&status_sender, format!("Found {} potential sources. Reading content...", all_results.len())).await;
+            
             // Limit and fetch content
             // We'll take top 5 unique results across all queries
             for (idx, result) in all_results.iter().take(5).enumerate() {
+                self.send_status(&status_sender, format!("Reading: {}", result.title)).await;
                 tracing::info!("Fetching content from result {}: {}", idx + 1, result.url);
                 match WebSearch::fetch_content(&result.url).await {
                     Ok(content) => {
@@ -154,13 +186,19 @@ impl RAGSystem {
                         ).await {
                             Ok(id) => {
                                 tracing::info!("Stored source {} in database", id);
-                                context_sources.push(crate::models::Source {
+                                let source = crate::models::Source {
                                     id,
                                     url: result.url.clone(),
                                     title: result.title.clone(),
                                     content,
                                     created_at: chrono::Utc::now(),
-                                });
+                                };
+                                
+                                if let Some(tx) = &status_sender {
+                                    let _ = tx.send(Ok(StreamEvent::Source(source.clone()))).await;
+                                }
+                                
+                                context_sources.push(source);
                             },
                             Err(e) => {
                                 tracing::warn!("Failed to store source {}: {}", result.url, e);
@@ -175,6 +213,7 @@ impl RAGSystem {
         }
         
         // Step 2: Retrieve relevant sources from database (always check DB too)
+        self.send_status(&status_sender, "Checking internal knowledge base...").await;
         tracing::info!("Searching database for relevant sources...");
         let db_sources = match self.db.search_sources(user_query, 3).await {
             Ok(sources) => {
@@ -199,6 +238,7 @@ impl RAGSystem {
         }
         
         // Step 3: Build context
+        self.send_status(&status_sender, "Synthesizing answer...").await;
         let context = if context_sources.is_empty() {
             "No relevant sources found.".to_string()
         } else {
@@ -297,6 +337,7 @@ impl RAGSystem {
                         // Check for tool calls
                         if let Some(tool_calls) = message.get("tool_calls").and_then(|tc| tc.as_array()) {
                             if !tool_calls.is_empty() {
+                                self.send_status(&status_sender, "Using calculation tools...").await;
                                 tracing::info!("AI requested {} tool calls", tool_calls.len());
                                 
                                 // Execute tools and add responses

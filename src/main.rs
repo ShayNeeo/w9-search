@@ -187,6 +187,7 @@ async fn run() -> anyhow::Result<()> {
         .route("/models", get(templates::models))
         .route("/health", get(health_check))
         .route("/api/query", post(api::handle_query))
+        .route("/api/query/stream", post(api::handle_query_stream))
         .route("/api/sources", get(api::get_sources))
         .route("/api/sync", post(api::sync_limits))
         .nest_service("/static", ServeDir::new("static"))

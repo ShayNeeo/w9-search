@@ -247,8 +247,13 @@ pub async fn index(State(state): State<AppState>) -> Html<String> {
                         }
                     }
                     
-                    div id="answer-section" class="answer-section" {}
-                    div id="sources-section" class="sources-section" {}
+                    div id="thinking-section" class="thinking-section" style="display: none;" {
+                        h3 { "Thinking Process" }
+                        div id="thinking-steps" class="thinking-steps" {}
+                    }
+                    
+                    div id="answer-section" class="answer-section" style="display: none;" {}
+                    div id="sources-section" class="sources-section" style="display: none;" {}
                 }
                 
                 script {
@@ -267,7 +272,7 @@ pub async fn index(State(state): State<AppState>) -> Html<String> {
                         }
                     });
                     
-                    // Configure Marked for markdown rendering
+                    // Configure Marked
                     marked.setOptions({
                         breaks: true,
                         gfm: true,
@@ -276,26 +281,19 @@ pub async fn index(State(state): State<AppState>) -> Html<String> {
                     });
                     
                     function renderMarkdown(markdown) {
-                        // Render markdown to HTML
                         const html = marked.parse(markdown);
-                        
-                        // Create a temporary container to process mermaid diagrams
                         const tempDiv = document.createElement('div');
                         tempDiv.innerHTML = html;
                         
-                        // Find and process mermaid code blocks
                         const mermaidBlocks = tempDiv.querySelectorAll('code.language-mermaid, pre code.language-mermaid');
                         mermaidBlocks.forEach((block, index) => {
                             const mermaidCode = block.textContent;
                             const mermaidId = 'mermaid-' + Date.now() + '-' + index;
-                            
-                            // Create mermaid div
                             const mermaidDiv = document.createElement('div');
                             mermaidDiv.className = 'mermaid';
                             mermaidDiv.id = mermaidId;
                             mermaidDiv.textContent = mermaidCode;
                             
-                            // Replace code block with mermaid div
                             const pre = block.closest('pre');
                             if (pre) {
                                 pre.parentNode.replaceChild(mermaidDiv, pre);
@@ -308,7 +306,6 @@ pub async fn index(State(state): State<AppState>) -> Html<String> {
                     }
                     
                     function renderMermaid(container) {
-                        // Find all mermaid divs and render them
                         const mermaidDivs = container.querySelectorAll('.mermaid');
                         mermaidDivs.forEach((div) => {
                             if (!div.hasAttribute('data-processed')) {
@@ -350,12 +347,23 @@ pub async fn index(State(state): State<AppState>) -> Html<String> {
                         
                         const answerSection = document.getElementById('answer-section');
                         const sourcesSection = document.getElementById('sources-section');
+                        const thinkingSection = document.getElementById('thinking-section');
+                        const thinkingSteps = document.getElementById('thinking-steps');
+                        const submitBtn = document.querySelector('.submit-btn');
                         
-                        answerSection.innerHTML = '<div class="loading">Processing...</div>';
-                        sourcesSection.innerHTML = '';
+                        // Reset UI
+                        answerSection.style.display = 'none';
+                        sourcesSection.style.display = 'none';
+                        thinkingSection.style.display = 'block';
+                        answerSection.innerHTML = '';
+                        sourcesSection.innerHTML = '<h3>Sources</h3>';
+                        thinkingSteps.innerHTML = '';
+                        submitBtn.disabled = true;
+                        
+                        let accumulatedSources = [];
                         
                         try {
-                            const response = await fetch('/api/query', {
+                            const response = await fetch('/api/query/stream', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
                                 body: JSON.stringify({ 
@@ -366,31 +374,69 @@ pub async fn index(State(state): State<AppState>) -> Html<String> {
                                 })
                             });
                             
-                            const data = await response.json();
+                            const reader = response.body.getReader();
+                            const decoder = new TextDecoder();
+                            let buffer = '';
                             
-                            // Render markdown with mermaid support
-                            const markdownHtml = renderMarkdown(data.answer);
-                            answerSection.innerHTML = `<div class="answer markdown-body">${markdownHtml}</div>`;
-                            
-                            // Render mermaid diagrams after markdown is rendered
-                            setTimeout(() => {
-                                renderMermaid(answerSection);
-                            }, 100);
-                            
-                            if (data.sources && data.sources.length > 0) {
-                                const sourcesHtml = data.sources.map((s, i) => 
-                                    `<div class="source-item">
-                                        <div class="source-number">${i + 1}</div>
-                                        <div class="source-content">
-                                            <a href="${s.url}" target="_blank" class="source-title">${s.title}</a>
-                                            <div class="source-url">${s.url}</div>
-                                        </div>
-                                    </div>`
-                                ).join('');
-                                sourcesSection.innerHTML = `<h3>Sources</h3>${sourcesHtml}`;
+                            while (true) {
+                                const { done, value } = await reader.read();
+                                if (done) break;
+                                
+                                buffer += decoder.decode(value, { stream: true });
+                                const lines = buffer.split('\n\n');
+                                buffer = lines.pop(); // Keep incomplete line in buffer
+                                
+                                for (const line of lines) {
+                                    if (line.startsWith('data: ')) {
+                                        const jsonStr = line.substring(6);
+                                        try {
+                                            const event = JSON.parse(jsonStr);
+                                            
+                                            if (event.type === 'Status') {
+                                                const step = document.createElement('div');
+                                                step.className = 'thinking-step';
+                                                step.textContent = '> ' + event.data;
+                                                thinkingSteps.appendChild(step);
+                                                thinkingSteps.scrollTop = thinkingSteps.scrollHeight;
+                                            } else if (event.type === 'Source') {
+                                                sourcesSection.style.display = 'block';
+                                                accumulatedSources.push(event.data);
+                                                const idx = accumulatedSources.length;
+                                                const s = event.data;
+                                                const sourceHtml = `
+                                                    <div class="source-item">
+                                                        <div class="source-number">${idx}</div>
+                                                        <div class="source-content">
+                                                            <a href="${s.url}" target="_blank" class="source-title">${s.title}</a>
+                                                            <div class="source-url">${s.url}</div>
+                                                        </div>
+                                                    </div>`;
+                                                sourcesSection.insertAdjacentHTML('beforeend', sourceHtml);
+                                            } else if (event.type === 'Answer') {
+                                                answerSection.style.display = 'block';
+                                                const markdownHtml = renderMarkdown(event.data);
+                                                answerSection.innerHTML = `<div class="answer markdown-body">${markdownHtml}</div>`;
+                                                setTimeout(() => renderMermaid(answerSection), 100);
+                                                // Hide thinking section after answer arrives? Or keep it?
+                                                // Let's keep it but maybe collapse it or style it differently.
+                                            } else if (event.type === 'Error') {
+                                                const step = document.createElement('div');
+                                                step.className = 'thinking-step error';
+                                                step.textContent = 'Error: ' + event.data;
+                                                thinkingSteps.appendChild(step);
+                                            } else if (event.type === 'Done') {
+                                                // Finished
+                                            }
+                                        } catch (e) {
+                                            console.warn('Failed to parse SSE event:', e);
+                                        }
+                                    }
+                                }
                             }
                         } catch (error) {
-                            answerSection.innerHTML = `<div class="error">Error: ${error.message}</div>`;
+                            thinkingSteps.innerHTML += `<div class="thinking-step error">Network Error: ${error.message}</div>`;
+                        } finally {
+                            submitBtn.disabled = false;
                         }
                     });
                     "#))

@@ -95,9 +95,19 @@ struct StandardModel {
 }
 
 #[derive(Deserialize)]
+struct CerebrasModelResponse {
+    data: Vec<CerebrasModel>,
+}
+
+#[derive(Deserialize)]
 struct CerebrasModel {
     id: String,
-    context_length: Option<i64>,
+    limits: Option<CerebrasLimits>,
+}
+
+#[derive(Deserialize)]
+struct CerebrasLimits {
+    max_context_length: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -347,18 +357,18 @@ impl LLMManager {
 
     async fn fetch_cerebras_models(&self, client: &reqwest::Client, _key: &str) -> Result<Vec<Model>> {
         // Use public endpoint for better metadata
-        let resp: Vec<CerebrasModel> = client.get("https://api.cerebras.ai/public/v1/models")
+        let resp: CerebrasModelResponse = client.get("https://api.cerebras.ai/public/v1/models")
             .send()
             .await?
             .json()
             .await?;
 
-        let models = resp.into_iter()
+        let models = resp.data.into_iter()
             .map(|m| Model {
                 id: m.id.clone(),
                 name: m.id,
                 provider: ProviderType::Cerebras,
-                context_length: m.context_length,
+                context_length: m.limits.and_then(|l| l.max_context_length),
                 is_free: false,
             })
             .collect();
