@@ -26,7 +26,6 @@ services:
       - 1.1.1.1
 
   searxng:
-    container_name: searxng
     image: searxng/searxng:latest
     restart: always
     networks:
@@ -34,11 +33,6 @@ services:
     ports:
       - "${SEARXNG_PORT:-8080}:8080"
     volumes:
-      - ./searxng:/etc/searxng:rw
-    environment:
-      - BASE_URL=http://localhost:8080/
-      - INSTANCE_NAME=w9-searxng
-      - SEARXNG_SECRET=${SEARXNG_SECRET} # Secret key from env for security
 
 networks:
   w9-network:
