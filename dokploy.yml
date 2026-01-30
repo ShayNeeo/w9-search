@@ -1,0 +1,10 @@
+# Dokploy configuration
+# This file helps Dokploy understand your application
+
+name: w9-search
+port: 3000
+healthcheck:
+  path: /
+  interval: 30s
+  timeout: 10s
+  retries: 3
