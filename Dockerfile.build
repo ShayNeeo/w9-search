@@ -39,6 +39,9 @@ RUN apt-get update && apt-get install -y \
 # Copy the binary from builder
 COPY --from=builder /app/target/release/w9-search /app/w9-search
 
+# Verify binary exists and is executable
+RUN ls -la /app/w9-search && file /app/w9-search
+
 # Copy static files
 COPY static ./static
 
@@ -58,4 +61,5 @@ ENV DATABASE_URL=sqlite:/app/data/w9_search.db
 
 # Run the application with explicit error handling
 # Use exec form to ensure proper signal handling
-CMD ["./w9-search"]
+# Also ensure stderr/stdout are unbuffered for immediate log visibility
+CMD ["/app/w9-search"]

@@ -23,23 +23,41 @@ pub struct AppState {
 
 #[tokio::main]
 async fn main() {
-    // Initialize logging first
+    // Initialize logging first - ensure it writes to stderr for Docker logs
     tracing_subscriber::fmt()
         .with_max_level(tracing::Level::INFO)
         .with_target(false)
+        .with_writer(std::io::stderr)
         .init();
+    
+    // Set panic hook to log panics
+    std::panic::set_hook(Box::new(|panic_info| {
+        eprintln!("PANIC: {:?}", panic_info);
+        tracing::error!("PANIC: {:?}", panic_info);
+    }));
     
     // Load .env file (ignore errors if it doesn't exist)
     dotenv::dotenv().ok();
     
+    eprintln!("=== W9 Search Starting ===");
+    tracing::info!("=== W9 Search Starting ===");
+    
     if let Err(e) = run().await {
+        eprintln!("=== FATAL ERROR ===");
         eprintln!("Fatal error: {}", e);
         eprintln!("Error chain: {:?}", e);
+        eprintln!("==================");
+        tracing::error!("Fatal error: {}", e);
+        tracing::error!("Error chain: {:?}", e);
+        
+        // Flush logs before exiting
+        std::io::Write::flush(&mut std::io::stderr()).ok();
         std::process::exit(1);
     }
 }
 
 async fn run() -> anyhow::Result<()> {
+    eprintln!("Starting W9 Search application...");
     tracing::info!("Starting W9 Search application...");
 
     let database_url = std::env::var("DATABASE_URL")
@@ -122,12 +140,29 @@ async fn run() -> anyhow::Result<()> {
         .layer(CorsLayer::permissive())
         .with_state(state);
 
+    eprintln!("Binding to 0.0.0.0:3000...");
     tracing::info!("Binding to 0.0.0.0:3000...");
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
+    
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
+        .await
+        .map_err(|e| {
+            eprintln!("Failed to bind to 0.0.0.0:3000: {}", e);
+            anyhow::anyhow!("Failed to bind to port 3000: {}", e)
+        })?;
+    
+    eprintln!("Server listening on http://0.0.0.0:3000");
+    eprintln!("Application ready to accept connections");
     tracing::info!("Server listening on http://0.0.0.0:3000");
     tracing::info!("Application ready to accept connections");
     
-    axum::serve(listener, app).await?;
+    // Flush stderr to ensure logs are visible
+    std::io::Write::flush(&mut std::io::stderr()).ok();
+    
+    axum::serve(listener, app).await
+        .map_err(|e| {
+            eprintln!("Server error: {}", e);
+            anyhow::anyhow!("Server error: {}", e)
+        })?;
 
     Ok(())
 }
