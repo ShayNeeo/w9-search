@@ -25,16 +25,30 @@ pub struct AppState {
 #[tokio::main]
 async fn main() {
     // Initialize logging first - ensure it writes to stderr for Docker logs
+    let log_level = std::env::var("RUST_LOG")
+        .unwrap_or_else(|_| "info".to_string())
+        .parse::<tracing::Level>()
+        .unwrap_or(tracing::Level::INFO);
+    
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
+        .with_max_level(log_level)
         .with_target(false)
         .with_writer(std::io::stderr)
+        .with_ansi(false) // Disable ANSI colors for Docker logs
         .init();
     
-    // Set panic hook to log panics
+    // Set panic hook to log panics with full backtrace
     std::panic::set_hook(Box::new(|panic_info| {
-        eprintln!("PANIC: {:?}", panic_info);
+        let backtrace = std::backtrace::Backtrace::capture();
+        eprintln!("═══════════════════════════════════════════════════════════");
+        eprintln!("PANIC OCCURRED!");
+        eprintln!("═══════════════════════════════════════════════════════════");
+        eprintln!("Location: {:?}", panic_info.location());
+        eprintln!("Message: {:?}", panic_info.payload().downcast_ref::<&str>());
+        eprintln!("Backtrace:\n{}", backtrace);
+        eprintln!("═══════════════════════════════════════════════════════════");
         tracing::error!("PANIC: {:?}", panic_info);
+        tracing::error!("Backtrace: {}", backtrace);
     }));
     
     // Load .env file (ignore errors if it doesn't exist)
@@ -133,13 +147,21 @@ async fn run() -> anyhow::Result<()> {
         std::fs::create_dir_all("static")?;
     }
 
+    // Health check endpoint
+    async fn health_check() -> &'static str {
+        "OK"
+    }
+    
     let app = Router::new()
         .route("/", get(templates::index))
+        .route("/health", get(health_check))
         .route("/api/query", post(api::handle_query))
         .route("/api/sources", get(api::get_sources))
         .nest_service("/static", ServeDir::new("static"))
         .layer(CorsLayer::permissive())
         .with_state(state);
+    
+    tracing::info!("Router configured with routes: /, /health, /api/query, /api/sources, /static");
 
     eprintln!("Binding to 0.0.0.0:3000...");
     tracing::info!("Binding to 0.0.0.0:3000...");
@@ -159,11 +181,39 @@ async fn run() -> anyhow::Result<()> {
     // Flush stderr to ensure logs are visible
     std::io::Write::flush(&mut std::io::stderr()).ok();
     
-    axum::serve(listener, app).await
-        .map_err(|e| {
-            eprintln!("Server error: {}", e);
-            anyhow::anyhow!("Server error: {}", e)
-        })?;
-
-    Ok(())
+    tracing::info!("Starting Axum server...");
+    eprintln!("Starting Axum server...");
+    eprintln!("Server will run until interrupted (CTRL+C)");
+    
+    // Use a signal handler to gracefully shutdown
+    let shutdown = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("Failed to install CTRL+C signal handler");
+        tracing::info!("Received shutdown signal");
+        eprintln!("Received shutdown signal");
+    };
+    
+    // Start server with error handling
+    match axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown)
+        .await
+    {
+        Ok(_) => {
+            tracing::info!("Server shutdown gracefully");
+            eprintln!("Server shutdown gracefully");
+            Ok(())
+        },
+        Err(e) => {
+            eprintln!("═══════════════════════════════════════════════════════════");
+            eprintln!("SERVER ERROR!");
+            eprintln!("═══════════════════════════════════════════════════════════");
+            eprintln!("Error: {}", e);
+            eprintln!("═══════════════════════════════════════════════════════════");
+            tracing::error!("Server error: {}", e);
+            tracing::error!("Error details: {:?}", e);
+            std::io::Write::flush(&mut std::io::stderr()).ok();
+            Err(anyhow::anyhow!("Server error: {}", e))
+        }
+    }
 }

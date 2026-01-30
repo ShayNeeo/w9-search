@@ -346,7 +346,9 @@ impl Tools {
     }
 
     pub fn execute_tool(name: &str, arguments: &Value) -> Result<String> {
-        match name {
+        tracing::info!("Executing tool: {} with arguments: {}", name, serde_json::to_string(arguments).unwrap_or_default());
+        
+        let result = match name {
             "get_current_date" => Self::get_current_date(arguments),
             "get_current_time" => Self::get_current_time(arguments),
             "calculate" => Self::calculate(arguments),
@@ -363,8 +365,18 @@ impl Tools {
             "validate_url" => Self::validate_url(arguments),
             "days_between_dates" => Self::days_between_dates(arguments),
             "extract_entities" => Self::extract_entities(arguments),
-            _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
+            _ => {
+                tracing::error!("Unknown tool requested: {}", name);
+                Err(anyhow::anyhow!("Unknown tool: {}", name))
+            },
+        };
+        
+        match &result {
+            Ok(res) => tracing::info!("Tool {} executed successfully, result length: {}", name, res.len()),
+            Err(e) => tracing::error!("Tool {} execution failed: {}", name, e),
         }
+        
+        result
     }
 
     fn get_current_date(args: &Value) -> Result<String> {

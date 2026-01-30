@@ -7,14 +7,19 @@ pub async fn handle_query(
     State(state): State<AppState>,
     Json(request): Json<QueryRequest>,
 ) -> Result<Json<QueryResponse>, impl IntoResponse> {
+    tracing::info!("Received query: '{}' (web_search: {})", request.query, request.web_search_enabled);
+    
     let rag = RAGSystem::new(state.db.clone(), state.openrouter_api_key.clone());
     
     match rag.query(&request.query, request.web_search_enabled).await {
         Ok((answer, sources)) => {
+            tracing::info!("Query successful, answer length: {}, sources: {}", answer.len(), sources.len());
             Ok(Json(QueryResponse { answer, sources }))
         }
         Err(e) => {
             tracing::error!("Query error: {}", e);
+            tracing::error!("Error chain: {:?}", e);
+            eprintln!("Query error: {}", e);
             Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Error: {}", e),

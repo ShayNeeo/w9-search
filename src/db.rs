@@ -7,9 +7,13 @@ pub struct Database {
 
 impl Database {
     pub async fn new(database_url: &str) -> anyhow::Result<Self> {
+        tracing::info!("Initializing database connection to: {}", database_url);
+        
         // Parse the connection string and add create_if_missing option
         let options = if database_url.starts_with("sqlite:") {
             let path = database_url.strip_prefix("sqlite:").unwrap();
+            
+            tracing::info!("SQLite path: {}", path);
             
             // Try to resolve to absolute path for better error messages
             let abs_path = std::path::Path::new(path)
@@ -21,20 +25,23 @@ impl Database {
                 })
                 .unwrap_or_else(|_| std::path::PathBuf::from(path));
             
-            tracing::info!("Connecting to SQLite database at: {:?}", abs_path);
+            tracing::info!("Resolved database path: {:?}", abs_path);
             
             SqliteConnectOptions::new()
                 .filename(path)
                 .create_if_missing(true)
         } else {
+            tracing::info!("Parsing database URL as full connection string");
             // Fallback to parsing the full URL
             database_url.parse::<SqliteConnectOptions>()?
                 .create_if_missing(true)
         };
         
+        tracing::info!("Attempting to connect to database...");
         let pool = SqlitePool::connect_with(options)
             .await
             .map_err(|e| {
+                tracing::error!("Database connection failed: {}", e);
                 anyhow::anyhow!(
                     "Failed to connect to SQLite database: {}. \
                     Database URL: {}. \
@@ -42,6 +49,8 @@ impl Database {
                     e, database_url
                 )
             })?;
+        
+        tracing::info!("Database connection established successfully");
         Ok(Self { pool })
     }
 
