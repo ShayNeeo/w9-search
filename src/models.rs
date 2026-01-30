@@ -18,6 +18,20 @@ pub struct QueryRequest {
     /// Optional model ID to use (must be one of AppState.models). If None, default_model is used.
     #[serde(default)]
     pub model: Option<String>,
+    /// Optional search provider to use. If None or "auto", automatic selection is used.
+    #[serde(default)]
+    pub search_provider: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ProviderMetrics {
+    pub provider: String,
+    pub req_min: Option<i64>,
+    pub req_day: Option<i64>,
+    pub req_month: Option<i64>,
+    pub limit_min: Option<i64>,
+    pub limit_day: Option<i64>,
+    pub limit_month: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

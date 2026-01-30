@@ -2,7 +2,7 @@
 # This file helps Dokploy understand your application
 
 name: w9-search
-port: 3005
+port: 3000
 healthcheck:
   path: /
   interval: 30s

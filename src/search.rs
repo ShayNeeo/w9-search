@@ -269,7 +269,37 @@ impl SearchProvider for SearXNGSearch {
 pub struct WebSearch;
 
 impl WebSearch {
-    pub async fn get_provider() -> Box<dyn SearchProvider> {
+    pub async fn get_provider(name: Option<&str>) -> Box<dyn SearchProvider> {
+        // If a specific provider is requested, try to use it if configured
+        if let Some(n) = name {
+            match n.to_lowercase().as_str() {
+                "searxng" => {
+                    if let Ok(url) = env::var("SEARXNG_BASE_URL") {
+                        if !url.is_empty() {
+                            return Box::new(SearXNGSearch { base_url: url });
+                        }
+                    }
+                },
+                "tavily" => {
+                    if let Ok(key) = env::var("TAVILY_API_KEY") {
+                        if !key.is_empty() {
+                            return Box::new(TavilySearch { api_key: key });
+                        }
+                    }
+                },
+                "brave" => {
+                    if let Ok(key) = env::var("BRAVE_API_KEY") {
+                        if !key.is_empty() {
+                            return Box::new(BraveSearch { api_key: key });
+                        }
+                    }
+                },
+                "duckduckgo" | "ddg" => return Box::new(DuckDuckGoSearch),
+                _ => {} // Fall through to auto
+            }
+        }
+
+        // Auto logic (Priority: SearXNG -> Tavily -> Brave -> DDG)
         if let Ok(url) = env::var("SEARXNG_BASE_URL") {
             if !url.is_empty() {
                 return Box::new(SearXNGSearch { base_url: url });
@@ -292,8 +322,8 @@ impl WebSearch {
     }
 
 
-    pub async fn search(db: &Database, query: &str) -> Result<Vec<SearchResult>> {
-        let provider = Self::get_provider().await;
+    pub async fn search(db: &Database, query: &str, provider: Option<&str>) -> Result<Vec<SearchResult>> {
+        let provider = Self::get_provider(provider).await;
         tracing::info!("Using search provider: {}", provider.name());
         provider.search(db, query).await
     }
@@ -306,15 +336,9 @@ impl WebSearch {
             let client = reqwest::Client::builder()
                 .timeout(std::time::Duration::from_secs(30))
                 .build()?;
-            // Tavily Usage Endpoint: https://api.tavily.com/usage?api_key=... (Wait, prompt says GET https://api.tavily.com/usage)
-            // But auth? "Tavily prefers... Usage endpoint". Prompt shows response body but not request format details other than endpoint.
-            // Usually auth is via query param or header?
-            // "Auth Header ... Authorization: Bearer" - Prompt comparison table says Tavily uses Bearer? No, "Search Endpoint" uses POST.
-            // Wait, Tavily usually uses `api_key` in body or query.
-            // Let's try query param `?api_key=` as it's a GET.
             
             let response = client.get("https://api.tavily.com/usage")
-                .query(&[("api_key", &key)]) 
+                .header("Authorization", format!("Bearer {}", key))
                 .send()
                 .await?;
                 

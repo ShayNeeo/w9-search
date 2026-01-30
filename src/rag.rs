@@ -11,14 +11,16 @@ pub struct RAGSystem {
     db: Arc<Database>,
     llm_manager: Arc<LLMManager>,
     model: String,
+    search_provider: Option<String>,
 }
 
 impl RAGSystem {
-    pub fn new(db: Arc<Database>, llm_manager: Arc<LLMManager>, model: String) -> Self {
+    pub fn new(db: Arc<Database>, llm_manager: Arc<LLMManager>, model: String, search_provider: Option<String>) -> Self {
         Self {
             db,
             llm_manager,
             model,
+            search_provider,
         }
     }
 
@@ -129,7 +131,7 @@ impl RAGSystem {
             
             for query in search_queries {
                 tracing::info!("Executing search step: {}", query);
-                if let Ok(results) = WebSearch::search(&self.db, &query).await {
+                if let Ok(results) = WebSearch::search(&self.db, &query, self.search_provider.as_deref()).await {
                     for result in results {
                         if seen_urls.insert(result.url.clone()) {
                             all_results.push(result);

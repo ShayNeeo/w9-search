@@ -37,7 +37,7 @@ async fn main() {
     
     tracing_subscriber::fmt()
         .with_max_level(log_level)
-        .with_target(false)
+        .with_target(true)
         .with_writer(std::io::stderr)
         .with_ansi(false) // Disable ANSI colors for Docker logs
         .init();
@@ -184,6 +184,7 @@ async fn run() -> anyhow::Result<()> {
     
     let app = Router::new()
         .route("/", get(templates::index))
+        .route("/models", get(templates::models))
         .route("/health", get(health_check))
         .route("/api/query", post(api::handle_query))
         .route("/api/sources", get(api::get_sources))
@@ -194,19 +195,24 @@ async fn run() -> anyhow::Result<()> {
     
     tracing::info!("Router configured with routes: /, /health, /api/query, /api/sources, /static");
 
-    eprintln!("Binding to 0.0.0.0:3000...");
-    tracing::info!("Binding to 0.0.0.0:3000...");
+    let port = std::env::var("PORT")
+        .unwrap_or_else(|_| "3000".to_string())
+        .parse::<u16>()
+        .unwrap_or(3000);
+
+    eprintln!("Binding to 0.0.0.0:{}...", port);
+    tracing::info!("Binding to 0.0.0.0:{}...", port);
     
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000")
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{}", port))
         .await
         .map_err(|e| {
-            eprintln!("Failed to bind to 0.0.0.0:3000: {}", e);
-            anyhow::anyhow!("Failed to bind to port 3000: {}", e)
+            eprintln!("Failed to bind to 0.0.0.0:{}: {}", port, e);
+            anyhow::anyhow!("Failed to bind to port {}: {}", port, e)
         })?;
     
-    eprintln!("Server listening on http://0.0.0.0:3000");
+    eprintln!("Server listening on http://0.0.0.0:{}", port);
     eprintln!("Application ready to accept connections");
-    tracing::info!("Server listening on http://0.0.0.0:3000");
+    tracing::info!("Server listening on http://0.0.0.0:{}", port);
     tracing::info!("Application ready to accept connections");
     
     // Flush stderr to ensure logs are visible

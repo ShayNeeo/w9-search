@@ -441,4 +441,14 @@ impl Database {
 
         Ok(true)
     }
+
+    pub async fn get_all_provider_metrics(&self) -> anyhow::Result<Vec<crate::models::ProviderMetrics>> {
+        let metrics = sqlx::query_as::<_, crate::models::ProviderMetrics>(
+            "SELECT provider, req_min, req_day, req_month, limit_min, limit_day, limit_month FROM provider_metrics"
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        
+        Ok(metrics)
+    }
 }

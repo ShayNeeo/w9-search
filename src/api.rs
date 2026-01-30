@@ -30,10 +30,13 @@ pub async fn handle_query(
         state.default_model.clone()
     };
     
-    tracing::info!("Using model '{}' for this query", model);
+    let search_provider = request.search_provider
+        .filter(|s| s != "auto");
+
+    tracing::info!("Using model '{}' and search provider '{:?}' for this query", model, search_provider);
     
     // Pass llm_manager instead of api_key
-    let rag = RAGSystem::new(state.db.clone(), state.llm_manager.clone(), model);
+    let rag = RAGSystem::new(state.db.clone(), state.llm_manager.clone(), model, search_provider);
     
     match rag.query(&request.query, request.web_search_enabled).await {
         Ok((answer, sources)) => {
