@@ -11,15 +11,15 @@ impl Database {
         let options = if database_url.starts_with("sqlite:") {
             let path = database_url.strip_prefix("sqlite:").unwrap();
             
-            // Resolve to absolute path for better error messages
+            // Try to resolve to absolute path for better error messages
             let abs_path = std::path::Path::new(path)
                 .canonicalize()
                 .or_else(|_| {
-                    // If canonicalize fails, try to get absolute path
+                    // If canonicalize fails, try to get absolute path from current dir
                     std::env::current_dir()
                         .map(|cwd| cwd.join(path))
-                        .or_else(|_| Ok(std::path::PathBuf::from(path)))
-                })?;
+                })
+                .unwrap_or_else(|_| std::path::PathBuf::from(path));
             
             tracing::info!("Connecting to SQLite database at: {:?}", abs_path);
             
