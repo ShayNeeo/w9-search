@@ -8,7 +8,7 @@ env:
   - RUST_LOG=info
   - DATABASE_URL=sqlite:/app/data/w9_search.db
 healthcheck:
-  path: /
+  path: /health
   interval: 30s
   timeout: 10s
   retries: 3

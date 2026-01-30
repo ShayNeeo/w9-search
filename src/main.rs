@@ -103,15 +103,15 @@ async fn run() -> anyhow::Result<()> {
                 let test_file = parent.join(".write_test");
                 match std::fs::File::create(&test_file) {
                     Ok(_) => {
-                        std::fs::remove_file(&test_file)?;
+                        std::fs::remove_file(&test_file).ok();
                         tracing::info!("Directory is writable");
                     }
                     Err(e) => {
-                        return Err(anyhow::anyhow!(
-                            "Database directory {:?} is not writable: {}. \
-                            Please ensure the directory exists and has write permissions.",
+                        tracing::warn!(
+                            "Database directory {:?} appears not to be writable: {}. \
+                            SQLite might fail to open the database.",
                             parent, e
-                        ));
+                        );
                     }
                 }
             } else {

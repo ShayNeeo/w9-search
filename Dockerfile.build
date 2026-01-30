@@ -34,6 +34,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
+    libsqlite3-0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the binary from builder
@@ -53,10 +54,10 @@ RUN mkdir -p /app/data && chmod 755 /app/data
 RUN mkdir -p /app/static
 
 # Expose port
-EXPOSE 3000
+EXPOSE 3005
 
 # Set environment variables
-ENV PORT=3000
+ENV PORT=3005
 ENV RUST_LOG=info
 ENV DATABASE_URL=sqlite:/app/data/w9_search.db
 
