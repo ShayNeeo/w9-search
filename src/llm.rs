@@ -140,7 +140,10 @@ impl LLMManager {
 
     pub async fn fetch_available_models(&self) -> Result<()> {
         let mut all_models = Vec::new();
-        let client = reqwest::Client::new();
+        // Use a client with timeout to prevent hanging during startup
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(30))
+            .build()?;
 
         // 1. OpenRouter (Free models)
         if let Some(key) = self.api_keys.get(&ProviderType::OpenRouter) {

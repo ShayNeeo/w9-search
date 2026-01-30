@@ -303,7 +303,9 @@ impl WebSearch {
             if key.is_empty() { return Ok(()); }
             
             tracing::info!("Syncing Tavily usage...");
-            let client = reqwest::Client::new();
+            let client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()?;
             // Tavily Usage Endpoint: https://api.tavily.com/usage?api_key=... (Wait, prompt says GET https://api.tavily.com/usage)
             // But auth? "Tavily prefers... Usage endpoint". Prompt shows response body but not request format details other than endpoint.
             // Usually auth is via query param or header?

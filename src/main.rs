@@ -138,26 +138,32 @@ async fn run() -> anyhow::Result<()> {
 
     // Initialize LLM Manager
     let llm_manager = Arc::new(LLMManager::new(db.clone()));
-    tracing::info!("Fetching available models...");
-    llm_manager.fetch_available_models().await?;
     
-    // Sync Tavily usage
-    tracing::info!("Syncing Tavily usage limits...");
-    WebSearch::sync_tavily_usage(&db).await.ok();
-    
-    let models = llm_manager.get_models().await;
-    if models.is_empty() {
-        tracing::warn!("No models found available from any provider!");
-    } else {
-        tracing::info!("Loaded {} models", models.len());
-        for m in models.iter().take(5) {
-             tracing::info!("- {} ({})", m.id, m.provider);
+    // Start background initialization task
+    // We do this in the background so the server can start up and pass health checks immediately
+    // even if external APIs are slow or timing out.
+    let manager_clone = llm_manager.clone();
+    let db_clone = db.clone();
+    tokio::spawn(async move {
+        tracing::info!("Background init: Fetching available models...");
+        if let Err(e) = manager_clone.fetch_available_models().await {
+            tracing::error!("Background init: Failed to fetch models: {}", e);
         }
-    }
-
-    let default_model = models.first()
-        .map(|m| m.id.clone())
-        .unwrap_or_else(|| "no-models-available".to_string());
+        
+        tracing::info!("Background init: Syncing Tavily usage...");
+        if let Err(e) = WebSearch::sync_tavily_usage(&db_clone).await {
+            tracing::error!("Background init: Failed to sync Tavily usage: {}", e);
+        }
+        
+        tracing::info!("Background init: Completed");
+    });
+    
+    // We don't display models here anymore as they are loaded in background
+    // But we still need a default model for the state.
+    // Since models aren't loaded yet, we'll use a placeholder or empty string
+    // The frontend should handle fetching models via API or handle empty state.
+    
+    let default_model = "loading...".to_string();
 
     let state = AppState {
         db,
