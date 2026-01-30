@@ -70,13 +70,27 @@ impl RAGSystem {
         };
         
         // Step 4: Query AI with RAG context
-        let system_prompt = format!(
-            "You are a helpful AI assistant with access to web sources. \
-            Use the provided sources to answer questions accurately. \
-            Cite sources using [Source N] format when referencing them.\n\n\
-            Sources:\n{}",
-            context
-        );
+        let system_prompt = if web_search_enabled {
+            format!(
+                "You are a helpful AI assistant with access to real-time web sources. \
+                CRITICAL: You MUST prioritize and rely EXCLUSIVELY on the provided web sources below. \
+                Do NOT use your training knowledge or general information - ONLY use information from the sources provided. \
+                If the sources do not contain enough information to answer the question, say so explicitly. \
+                Always cite your sources using [Source N] format when referencing any information. \
+                Base your answer STRICTLY on the provided sources, even if it contradicts your training data.\n\n\
+                Web Sources (use these exclusively):\n{}",
+                context
+            )
+        } else {
+            format!(
+                "You are a helpful AI assistant with access to stored sources. \
+                Use the provided sources to answer questions accurately when available. \
+                You may supplement with your knowledge if sources don't fully cover the question. \
+                Cite sources using [Source N] format when referencing them.\n\n\
+                Sources:\n{}",
+                context
+            )
+        };
         
         let messages = vec![
             OpenRouterMessage {
