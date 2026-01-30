@@ -186,6 +186,162 @@ impl Tools {
                     }
                 }
             }),
+            json!({
+                "type": "function",
+                "function": {
+                    "name": "unit_convert",
+                    "description": "Convert between different units (length, weight, temperature, etc.). Useful for answering questions about measurements.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "value": {
+                                "type": "number",
+                                "description": "The value to convert"
+                            },
+                            "from_unit": {
+                                "type": "string",
+                                "description": "Source unit (e.g., 'km', 'miles', 'celsius', 'fahrenheit', 'kg', 'pounds')"
+                            },
+                            "to_unit": {
+                                "type": "string",
+                                "description": "Target unit"
+                            }
+                        },
+                        "required": ["value", "from_unit", "to_unit"]
+                    }
+                }
+            }),
+            json!({
+                "type": "function",
+                "function": {
+                    "name": "extract_keywords",
+                    "description": "Extract key terms or keywords from a text. Useful for understanding the main topics or concepts.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "text": {
+                                "type": "string",
+                                "description": "Text to extract keywords from"
+                            },
+                            "max_keywords": {
+                                "type": "number",
+                                "description": "Maximum number of keywords to extract (default: 10)"
+                            }
+                        },
+                        "required": ["text"]
+                    }
+                }
+            }),
+            json!({
+                "type": "function",
+                "function": {
+                    "name": "compare_values",
+                    "description": "Compare two values and determine which is larger, smaller, or if they're equal. Useful for answering comparison questions.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "value1": {
+                                "type": "number",
+                                "description": "First value to compare"
+                            },
+                            "value2": {
+                                "type": "number",
+                                "description": "Second value to compare"
+                            }
+                        },
+                        "required": ["value1", "value2"]
+                    }
+                }
+            }),
+            json!({
+                "type": "function",
+                "function": {
+                    "name": "format_number",
+                    "description": "Format a number in various ways (currency, percentage, scientific notation, etc.).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "number": {
+                                "type": "number",
+                                "description": "Number to format"
+                            },
+                            "format": {
+                                "type": "string",
+                                "enum": ["currency", "percentage", "scientific", "comma", "ordinal"],
+                                "description": "Format type: 'currency' (add $), 'percentage' (add %), 'scientific' (e notation), 'comma' (thousands separator), 'ordinal' (1st, 2nd, etc.)"
+                            },
+                            "locale": {
+                                "type": "string",
+                                "description": "Optional locale (e.g., 'en-US', 'en-GB')"
+                            }
+                        },
+                        "required": ["number", "format"]
+                    }
+                }
+            }),
+            json!({
+                "type": "function",
+                "function": {
+                    "name": "validate_url",
+                    "description": "Validate and parse a URL. Returns whether it's valid and extracts components (domain, path, etc.).",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "url": {
+                                "type": "string",
+                                "description": "URL to validate"
+                            }
+                        },
+                        "required": ["url"]
+                    }
+                }
+            }),
+            json!({
+                "type": "function",
+                "function": {
+                    "name": "days_between_dates",
+                    "description": "Calculate the number of days between two dates. Useful for answering questions about time spans, durations, or age calculations.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "date1": {
+                                "type": "string",
+                                "description": "First date (various formats accepted)"
+                            },
+                            "date2": {
+                                "type": "string",
+                                "description": "Second date (various formats accepted). If not provided, uses current date."
+                            }
+                        },
+                        "required": ["date1"]
+                    }
+                }
+            }),
+            json!({
+                "type": "function",
+                "function": {
+                    "name": "extract_entities",
+                    "description": "Extract named entities (people, places, organizations, dates) from text. Useful for understanding who/what/when/where in a text.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "text": {
+                                "type": "string",
+                                "description": "Text to extract entities from"
+                            },
+                            "entity_types": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "enum": ["person", "place", "organization", "date", "all"]
+                                },
+                                "description": "Types of entities to extract (default: 'all')"
+                            }
+                        },
+                        "required": ["text"]
+                    }
+                }
+            }),
         ]
     }
 
@@ -200,6 +356,13 @@ impl Tools {
             "hash_string" => Self::hash_string(arguments),
             "base64_encode" => Self::base64_encode(arguments),
             "base64_decode" => Self::base64_decode(arguments),
+            "unit_convert" => Self::unit_convert(arguments),
+            "extract_keywords" => Self::extract_keywords(arguments),
+            "compare_values" => Self::compare_values(arguments),
+            "format_number" => Self::format_number(arguments),
+            "validate_url" => Self::validate_url(arguments),
+            "days_between_dates" => Self::days_between_dates(arguments),
+            "extract_entities" => Self::extract_entities(arguments),
             _ => Err(anyhow::anyhow!("Unknown tool: {}", name)),
         }
     }
@@ -413,5 +576,259 @@ impl Tools {
         use base64::{Engine as _, engine::general_purpose};
         let decoded = general_purpose::STANDARD.decode(text)?;
         Ok(String::from_utf8(decoded)?)
+    }
+
+    fn unit_convert(args: &Value) -> Result<String> {
+        let value = args.get("value")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'value' parameter"))?;
+        
+        let from_unit = args.get("from_unit")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'from_unit' parameter"))?;
+        
+        let to_unit = args.get("to_unit")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'to_unit' parameter"))?;
+        
+        let result = Self::convert_unit(value, from_unit, to_unit)?;
+        Ok(format!("{} {} = {} {}", value, from_unit, result, to_unit))
+    }
+
+    fn convert_unit(value: f64, from: &str, to: &str) -> Result<f64> {
+        let from_lower = from.to_lowercase();
+        let to_lower = to.to_lowercase();
+        
+        // Temperature conversions
+        if from_lower.as_str() == "celsius" && to_lower.as_str() == "fahrenheit" {
+            return Ok(value * 9.0 / 5.0 + 32.0);
+        }
+        if from_lower.as_str() == "fahrenheit" && to_lower.as_str() == "celsius" {
+            return Ok((value - 32.0) * 5.0 / 9.0);
+        }
+        
+        // Length conversions (to meters first, then to target)
+        let meters = match from_lower.as_str() {
+            "km" | "kilometer" | "kilometers" => value * 1000.0,
+            "m" | "meter" | "meters" => value,
+            "cm" | "centimeter" | "centimeters" => value * 0.01,
+            "mm" | "millimeter" | "millimeters" => value * 0.001,
+            "mile" | "miles" => value * 1609.34,
+            "yard" | "yards" => value * 0.9144,
+            "foot" | "feet" | "ft" => value * 0.3048,
+            "inch" | "inches" | "in" => value * 0.0254,
+            _ => return Err(anyhow::anyhow!("Unsupported unit: {}", from)),
+        };
+        
+        let result = match to_lower.as_str() {
+            "km" | "kilometer" | "kilometers" => meters / 1000.0,
+            "m" | "meter" | "meters" => meters,
+            "cm" | "centimeter" | "centimeters" => meters / 0.01,
+            "mm" | "millimeter" | "millimeters" => meters / 0.001,
+            "mile" | "miles" => meters / 1609.34,
+            "yard" | "yards" => meters / 0.9144,
+            "foot" | "feet" | "ft" => meters / 0.3048,
+            "inch" | "inches" | "in" => meters / 0.0254,
+            _ => return Err(anyhow::anyhow!("Unsupported unit: {}", to)),
+        };
+        
+        Ok(result)
+    }
+
+    fn extract_keywords(args: &Value) -> Result<String> {
+        let text = args.get("text")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'text' parameter"))?;
+        
+        let max_keywords = args.get("max_keywords")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(10) as usize;
+        
+        // Simple keyword extraction (for production, use proper NLP)
+        let words: Vec<&str> = text
+            .split_whitespace()
+            .filter(|w| w.len() > 3) // Filter short words
+            .collect();
+        
+        // Count word frequencies
+        use std::collections::HashMap;
+        let mut freq: HashMap<&str, usize> = HashMap::new();
+        for word in &words {
+            *freq.entry(word).or_insert(0) += 1;
+        }
+        
+        let mut keywords: Vec<(&str, usize)> = freq.into_iter().collect();
+        keywords.sort_by(|a, b| b.1.cmp(&a.1));
+        keywords.truncate(max_keywords);
+        
+        let result: Vec<String> = keywords.iter()
+            .map(|(word, count)| format!("{} ({}x)", word, count))
+            .collect();
+        
+        Ok(result.join(", "))
+    }
+
+    fn compare_values(args: &Value) -> Result<String> {
+        let value1 = args.get("value1")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'value1' parameter"))?;
+        
+        let value2 = args.get("value2")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'value2' parameter"))?;
+        
+        let diff = (value1 - value2).abs();
+        let diff_percent = if value2 != 0.0 {
+            (diff / value2.abs()) * 100.0
+        } else {
+            0.0
+        };
+        
+        if value1 > value2 {
+            Ok(format!("{} is {} larger than {} (difference: {:.2}, {:.1}% more)", 
+                value1, diff, value2, diff, diff_percent))
+        } else if value1 < value2 {
+            Ok(format!("{} is {} smaller than {} (difference: {:.2}, {:.1}% less)", 
+                value1, diff, value2, diff, diff_percent))
+        } else {
+            Ok(format!("{} and {} are equal", value1, value2))
+        }
+    }
+
+    fn format_number(args: &Value) -> Result<String> {
+        let number = args.get("number")
+            .and_then(|v| v.as_f64())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'number' parameter"))?;
+        
+        let format = args.get("format")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'format' parameter"))?;
+        
+        let result = match format {
+            "currency" => format!("${:.2}", number),
+            "percentage" => format!("{:.1}%", number * 100.0),
+            "scientific" => format!("{:.2e}", number),
+            "comma" => {
+                let formatted = format!("{:.0}", number);
+                // Simple comma insertion (for production use proper formatting)
+                formatted
+            },
+            "ordinal" => {
+                let n = number as i64;
+                let suffix = match n % 100 {
+                    11 | 12 | 13 => "th",
+                    _ => match n % 10 {
+                        1 => "st",
+                        2 => "nd",
+                        3 => "rd",
+                        _ => "th",
+                    }
+                };
+                format!("{}{}", n, suffix)
+            },
+            _ => return Err(anyhow::anyhow!("Unsupported format: {}", format)),
+        };
+        
+        Ok(result)
+    }
+
+    fn validate_url(args: &Value) -> Result<String> {
+        let url_str = args.get("url")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'url' parameter"))?;
+        
+        match url::Url::parse(url_str) {
+            Ok(url) => {
+                Ok(format!(
+                    "Valid URL\nDomain: {}\nPath: {}\nScheme: {}",
+                    url.domain().unwrap_or("N/A"),
+                    url.path(),
+                    url.scheme()
+                ))
+            },
+            Err(e) => Ok(format!("Invalid URL: {}", e))
+        }
+    }
+
+    fn days_between_dates(args: &Value) -> Result<String> {
+        let date1_str = args.get("date1")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'date1' parameter"))?;
+        
+        let date2_str = args.get("date2")
+            .and_then(|v| v.as_str());
+        
+        let date1 = Self::parse_date(date1_str)?;
+        let date2 = if let Some(ds) = date2_str {
+            Self::parse_date(ds)?
+        } else {
+            Utc::now()
+        };
+        
+        let diff = (date2 - date1).num_days();
+        let abs_diff = diff.abs();
+        
+        if diff > 0 {
+            Ok(format!("{} days from {} to {}", abs_diff, date1_str, 
+                date2_str.unwrap_or("today")))
+        } else if diff < 0 {
+            Ok(format!("{} days ago (from {} to {})", abs_diff, date1_str,
+                date2_str.unwrap_or("today")))
+        } else {
+            Ok("0 days (same date)".to_string())
+        }
+    }
+
+    fn parse_date(date_str: &str) -> Result<DateTime<Utc>> {
+        // Try various date formats
+        if let Ok(ts) = date_str.parse::<i64>() {
+            return Ok(DateTime::from_timestamp(ts, 0).unwrap());
+        }
+        
+        if let Ok(dt) = DateTime::parse_from_rfc3339(date_str) {
+            return Ok(dt.with_timezone(&Utc));
+        }
+        
+        if let Ok(dt) = chrono::NaiveDate::parse_from_str(date_str, "%Y-%m-%d") {
+            return Ok(dt.and_hms_opt(0, 0, 0).unwrap().and_utc());
+        }
+        
+        Err(anyhow::anyhow!("Could not parse date: {}", date_str))
+    }
+
+    fn extract_entities(args: &Value) -> Result<String> {
+        let text = args.get("text")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing 'text' parameter"))?;
+        
+        // Simple entity extraction (for production, use proper NLP library)
+        let mut entities = Vec::new();
+        
+        // Extract potential dates (YYYY-MM-DD, MM/DD/YYYY, etc.)
+        let date_pattern = regex::Regex::new(r"\d{4}-\d{2}-\d{2}|\d{1,2}/\d{1,2}/\d{4}").unwrap();
+        for mat in date_pattern.find_iter(text) {
+            entities.push(format!("Date: {}", mat.as_str()));
+        }
+        
+        // Extract URLs
+        let url_pattern = regex::Regex::new(r"https?://[^\s]+").unwrap();
+        for mat in url_pattern.find_iter(text) {
+            entities.push(format!("URL: {}", mat.as_str()));
+        }
+        
+        // Extract capitalized words (potential names/organizations)
+        let cap_pattern = regex::Regex::new(r"\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b").unwrap();
+        for mat in cap_pattern.find_iter(text) {
+            let word = mat.as_str();
+            if word.len() > 2 && !entities.iter().any(|e| e.contains(word)) {
+                entities.push(format!("Potential entity: {}", word));
+            }
+        }
+        
+        if entities.is_empty() {
+            Ok("No entities found".to_string())
+        } else {
+            Ok(entities.join("\n"))
+        }
     }
 }

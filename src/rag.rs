@@ -28,8 +28,24 @@ impl RAGSystem {
         let time_sensitive_keywords = [
             "current", "today", "now", "present", "latest", "recent", 
             "who is", "what is the current", "who are the current",
-            "president", "leader", "ceo", "chairman", "minister"
+            "president", "leader", "ceo", "chairman", "minister",
+            "happened today", "news", "breaking", "update"
         ];
+        
+        // Check for comparison queries that might need calculation
+        let needs_calculation = query_lower.contains("compare") || 
+            query_lower.contains("difference") ||
+            query_lower.contains("larger") ||
+            query_lower.contains("smaller") ||
+            query_lower.contains("more than") ||
+            query_lower.contains("less than");
+        
+        // Check for unit conversion queries
+        let needs_conversion = query_lower.contains("convert") ||
+            query_lower.contains("to ") && (query_lower.contains("km") || 
+            query_lower.contains("miles") || query_lower.contains("celsius") ||
+            query_lower.contains("fahrenheit") || query_lower.contains("kg") ||
+            query_lower.contains("pounds"));
         
         let is_time_sensitive = time_sensitive_keywords.iter()
             .any(|keyword| query_lower.contains(keyword));
@@ -38,6 +54,12 @@ impl RAGSystem {
             // Get current date to add context
             let current_date = chrono::Utc::now().format("%Y-%m-%d").to_string();
             format!("{} as of {}", query, current_date)
+        } else if needs_calculation {
+            // Add context for calculation queries
+            format!("{} (use calculation tools if needed)", query)
+        } else if needs_conversion {
+            // Add context for conversion queries
+            format!("{} (use unit conversion tools if needed)", query)
         } else {
             query.to_string()
         }
@@ -108,12 +130,35 @@ impl RAGSystem {
                    - Always fetch the current date first to establish temporal context\n\
                    - Use the date to determine if sources are recent enough\n\
                    - If sources don't include the current date, note this limitation\n\n\
-                TOOL USAGE GUIDELINES:\n\
-                - Use get_current_date for ANY question involving 'current', 'today', 'now', 'present', 'latest'\n\
-                - Use get_current_time when time-specific information is needed\n\
-                - Use calculate for any mathematical operations\n\
-                - Use format_date when converting between date formats\n\
-                - Use web search results ONLY - do not rely on training data for current information\n\n\
+                INTELLIGENT TOOL USAGE PATTERNS:\n\
+                \n\
+                TIME-SENSITIVE QUERIES:\n\
+                - 'current', 'today', 'now', 'present', 'latest' → get_current_date FIRST\n\
+                - 'who is the current X' → get_current_date → search with date context\n\
+                - 'what happened today' → get_current_date → search for today's events\n\
+                - Age questions → get_current_date → days_between_dates\n\
+                \n\
+                MATHEMATICAL & COMPARISON QUERIES:\n\
+                - Any math expression → calculate tool\n\
+                - 'compare', 'difference between', 'larger than' → compare_values\n\
+                - 'convert X to Y' → unit_convert\n\
+                - 'format as currency/percentage' → format_number\n\
+                \n\
+                DATA EXTRACTION & ANALYSIS:\n\
+                - 'extract', 'find keywords', 'main topics' → extract_keywords\n\
+                - 'who/what/where mentioned' → extract_entities\n\
+                - 'validate URL', 'check link' → validate_url\n\
+                \n\
+                DATE & TIME OPERATIONS:\n\
+                - 'how many days', 'time between' → days_between_dates\n\
+                - 'format date' → format_date\n\
+                - 'convert timezone' → timezone_convert\n\
+                \n\
+                GENERAL GUIDELINES:\n\
+                - Always use tools proactively when they can provide accurate, real-time data\n\
+                - Combine multiple tools when needed (e.g., get_current_date + days_between_dates for age)\n\
+                - Use web search results ONLY - do not rely on training data for current information\n\
+                - When in doubt about current information, use get_current_date to establish context\n\n\
                 SOURCE PRIORITY:\n\
                 - CRITICAL: You MUST prioritize and rely EXCLUSIVELY on the provided web sources below\n\
                 - Do NOT use your training knowledge for current/real-time information\n\
@@ -126,16 +171,26 @@ impl RAGSystem {
         } else {
             format!(
                 "You are a helpful AI assistant with access to stored sources and powerful tools.\n\n\
-                TOOL USAGE FOR TIME-SENSITIVE QUERIES:\n\
-                - If asked about 'current', 'today', 'now', or present-day information:\n\
-                  - FIRST use get_current_date to establish temporal context\n\
-                  - THEN evaluate if stored sources are recent enough\n\
-                  - If sources are outdated, clearly state this limitation\n\n\
+                INTELLIGENT TOOL USAGE:\n\
+                \n\
+                TIME-SENSITIVE QUERIES:\n\
+                - 'current', 'today', 'now', 'present' → get_current_date FIRST\n\
+                - Age calculations → get_current_date + days_between_dates\n\
+                - 'how long ago' → days_between_dates\n\
+                \n\
+                MATHEMATICAL OPERATIONS:\n\
+                - Any calculation → calculate tool\n\
+                - Comparisons → compare_values\n\
+                - Unit conversions → unit_convert\n\
+                - Number formatting → format_number\n\
+                \n\
+                TEXT ANALYSIS:\n\
+                - Extract main points → extract_keywords\n\
+                - Find entities (people, places) → extract_entities\n\
+                \n\
                 GENERAL GUIDELINES:\n\
-                - Use get_current_date for questions involving 'current', 'today', 'now', 'present'\n\
-                - Use get_current_time when time-specific information is needed\n\
-                - Use calculate for mathematical operations\n\
-                - Use format_date when converting between date formats\n\
+                - Use tools proactively to get accurate, real-time data\n\
+                - Combine tools intelligently (e.g., date + calculation for age)\n\
                 - Prioritize stored sources when available\n\
                 - You may supplement with your knowledge if sources don't fully cover the question\n\
                 - Always cite sources using [Source N] format when referencing them\n\n\
