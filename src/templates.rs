@@ -2,6 +2,15 @@ use axum::response::Html;
 use maud::{html, Markup, DOCTYPE};
 
 pub async fn index() -> Html<String> {
+    // Read available models from environment for frontend selection
+    let models_env = std::env::var("OPENROUTER_MODELS")
+        .unwrap_or_else(|_| "tngtech/deepseek-r1t2-chimera:free,arcee-ai/trinity-large-preview:free".to_string());
+    let models: Vec<String> = models_env
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+
     let markup: Markup = html! {
         (DOCTYPE)
         html lang="en" {
@@ -44,6 +53,15 @@ pub async fn index() -> Html<String> {
                                         {}
                                         span class="slider" {}
                                         span class="toggle-label" { "WebSearch" }
+                                    }
+
+                                    div class="model-select" {
+                                        label for="model-select" { "Model" }
+                                        select id="model-select" name="model" {
+                                            @for model in &models {
+                                                option value=(model) { (model) }
+                                            }
+                                        }
                                     }
                                     
                                     button type="submit" class="submit-btn" {
@@ -129,6 +147,8 @@ pub async fn index() -> Html<String> {
                         e.preventDefault();
                         const query = document.getElementById('query-input').value;
                         const webSearchEnabled = document.getElementById('web-search-toggle').checked;
+                        const modelSelect = document.getElementById('model-select');
+                        const model = modelSelect ? modelSelect.value : null;
                         
                         const answerSection = document.getElementById('answer-section');
                         const sourcesSection = document.getElementById('sources-section');
@@ -140,7 +160,7 @@ pub async fn index() -> Html<String> {
                             const response = await fetch('/api/query', {
                                 method: 'POST',
                                 headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({ query, web_search_enabled: webSearchEnabled })
+                                body: JSON.stringify({ query, web_search_enabled: webSearchEnabled, model })
                             });
                             
                             const data = await response.json();

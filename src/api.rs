@@ -7,9 +7,29 @@ pub async fn handle_query(
     State(state): State<AppState>,
     Json(request): Json<QueryRequest>,
 ) -> Result<Json<QueryResponse>, impl IntoResponse> {
-    tracing::info!("Received query: '{}' (web_search: {})", request.query, request.web_search_enabled);
+    tracing::info!(
+        "Received query: '{}' (web_search: {}, model: {:?})",
+        request.query,
+        request.web_search_enabled,
+        request.model
+    );
     
-    let rag = RAGSystem::new(state.db.clone(), state.openrouter_api_key.clone());
+    // Determine model to use
+    let requested_model = request.model.clone().unwrap_or_else(|| state.default_model.clone());
+    let model = if state.models.contains(&requested_model) {
+        requested_model
+    } else {
+        tracing::warn!(
+            "Requested model '{}' not in available models {:?}; using default '{}'",
+            requested_model,
+            state.models,
+            state.default_model
+        );
+        state.default_model.clone()
+    };
+    tracing::info!("Using model '{}' for this query", model);
+    
+    let rag = RAGSystem::new(state.db.clone(), state.openrouter_api_key.clone(), model);
     
     match rag.query(&request.query, request.web_search_enabled).await {
         Ok((answer, sources)) => {

@@ -20,6 +20,10 @@ use crate::db::Database;
 pub struct AppState {
     pub db: Arc<Database>,
     pub openrouter_api_key: String,
+    /// List of allowed OpenRouter model IDs
+    pub models: Vec<String>,
+    /// Default model ID (first in models)
+    pub default_model: String,
 }
 
 #[tokio::main]
@@ -128,6 +132,21 @@ async fn run() -> anyhow::Result<()> {
     
     tracing::info!("OpenRouter API key configured (length: {})", openrouter_api_key.len());
 
+    // Parse available models from environment
+    let models_env = std::env::var("OPENROUTER_MODELS")
+        .unwrap_or_else(|_| "tngtech/deepseek-r1t2-chimera:free,arcee-ai/trinity-large-preview:free".to_string());
+    let models: Vec<String> = models_env
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let default_model = models
+        .get(0)
+        .cloned()
+        .unwrap_or_else(|| "tngtech/deepseek-r1t2-chimera:free".to_string());
+    tracing::info!("Available models: {:?}", models);
+    tracing::info!("Default model: {}", default_model);
+
     tracing::info!("Connecting to database...");
     let db = Database::new(&database_url).await?;
     tracing::info!("Database connected successfully");
@@ -139,6 +158,8 @@ async fn run() -> anyhow::Result<()> {
     let state = AppState {
         db: Arc::new(db),
         openrouter_api_key,
+        models,
+        default_model,
     };
 
     // Check if static directory exists

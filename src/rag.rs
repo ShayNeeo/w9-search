@@ -12,11 +12,11 @@ pub struct RAGSystem {
 }
 
 impl RAGSystem {
-    pub fn new(db: Arc<Database>, api_key: String) -> Self {
+    pub fn new(db: Arc<Database>, api_key: String, model: String) -> Self {
         Self {
             db,
             api_key,
-            model: "tngtech/deepseek-r1t2-chimera:free".to_string(),
+            model,
         }
     }
     

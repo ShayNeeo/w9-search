@@ -15,6 +15,9 @@ pub struct Source {
 pub struct QueryRequest {
     pub query: String,
     pub web_search_enabled: bool,
+    /// Optional model ID to use (must be one of AppState.models). If None, default_model is used.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
