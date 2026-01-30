@@ -73,11 +73,15 @@ pub async fn get_sources(
 pub async fn sync_limits(
     State(state): State<AppState>,
 ) -> impl IntoResponse {
-    match WebSearch::sync_tavily_usage(&state.db).await {
-        Ok(_) => StatusCode::OK,
-        Err(e) => {
-            tracing::error!("Sync limits error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
+    // Sync Tavily
+    if let Err(e) = WebSearch::sync_tavily_usage(&state.db).await {
+        tracing::error!("Sync Tavily limits error: {}", e);
     }
+    
+    // Sync LLM Providers (OpenRouter, Pollinations, etc.)
+    if let Err(e) = state.llm_manager.refresh_llm_limits().await {
+        tracing::error!("Sync LLM limits error: {}", e);
+    }
+    
+    StatusCode::OK
 }

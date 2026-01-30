@@ -91,7 +91,13 @@ struct StandardModelResponse {
 #[derive(Deserialize)]
 struct StandardModel {
     id: String,
-    // Groq/Cerebras might provide different fields, but usually just 'id' is reliable
+    context_window: Option<i64>, // For Groq
+}
+
+#[derive(Deserialize)]
+struct CerebrasModel {
+    id: String,
+    context_length: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -103,6 +109,14 @@ struct CohereModelResponse {
 struct CohereModel {
     name: String,
     context_length: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct PollinationsModel {
+    name: String,
+    description: Option<String>,
+    #[serde(rename = "context_window")]
+    context_window: Option<i64>,
 }
 
 pub struct LLMManager {
@@ -193,6 +207,10 @@ impl LLMManager {
                 Ok(mut models) => all_models.append(&mut models),
                 Err(e) => tracing::error!("Failed to fetch Pollinations models: {}", e),
             }
+
+            if let Err(e) = self.fetch_pollinations_limits(&client, key).await {
+                tracing::warn!("Failed to fetch Pollinations limits: {}", e);
+            }
         }
 
         let count = all_models.len();
@@ -205,6 +223,22 @@ impl LLMManager {
         Ok(())
     }
     
+    pub async fn refresh_llm_limits(&self) -> Result<()> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()?;
+
+        if let Some(key) = self.api_keys.get(&ProviderType::OpenRouter) {
+            let _ = self.fetch_openrouter_limits(&client, key).await;
+        }
+
+        if let Some(key) = self.api_keys.get(&ProviderType::Pollinations) {
+            let _ = self.fetch_pollinations_limits(&client, key).await;
+        }
+
+        Ok(())
+    }
+
     async fn fetch_openrouter_limits(&self, client: &reqwest::Client, key: &str) -> Result<()> {
         let resp = client.get("https://openrouter.ai/api/v1/key")
             .header("Authorization", format!("Bearer {}", key))
@@ -303,7 +337,7 @@ impl LLMManager {
                 id: m.id.clone(),
                 name: m.id,
                 provider: ProviderType::Groq,
-                context_length: None,
+                context_length: m.context_window,
                 is_free: false,
             })
             .collect();
@@ -311,20 +345,20 @@ impl LLMManager {
         Ok(models)
     }
 
-    async fn fetch_cerebras_models(&self, client: &reqwest::Client, key: &str) -> Result<Vec<Model>> {
-        let resp: StandardModelResponse = client.get("https://api.cerebras.ai/v1/models")
-            .header("Authorization", format!("Bearer {}", key))
+    async fn fetch_cerebras_models(&self, client: &reqwest::Client, _key: &str) -> Result<Vec<Model>> {
+        // Use public endpoint for better metadata
+        let resp: Vec<CerebrasModel> = client.get("https://api.cerebras.ai/public/v1/models")
             .send()
             .await?
             .json()
             .await?;
 
-        let models = resp.data.into_iter()
+        let models = resp.into_iter()
             .map(|m| Model {
                 id: m.id.clone(),
                 name: m.id,
                 provider: ProviderType::Cerebras,
-                context_length: None,
+                context_length: m.context_length,
                 is_free: false,
             })
             .collect();
@@ -355,23 +389,48 @@ impl LLMManager {
     }
 
     async fn fetch_pollinations_models(&self, client: &reqwest::Client, _key: &str) -> Result<Vec<Model>> {
-        let resp: StandardModelResponse = client.get("https://gen.pollinations.ai/v1/models")
+        // Fetch from gen.pollinations.ai/text/models for metadata
+        let resp: Vec<PollinationsModel> = client.get("https://gen.pollinations.ai/text/models")
             .send()
             .await?
             .json()
             .await?;
 
-        let models = resp.data.into_iter()
+        let models = resp.into_iter()
             .map(|m| Model {
-                id: m.id.clone(),
-                name: m.id,
+                id: m.name.clone(),
+                name: m.name,
                 provider: ProviderType::Pollinations,
-                context_length: None,
-                is_free: false, 
+                context_length: m.context_window.or(Some(16000)),
+                is_free: true, 
             })
             .collect();
         
         Ok(models)
+    }
+
+    async fn fetch_pollinations_limits(&self, client: &reqwest::Client, key: &str) -> Result<()> {
+        let resp = client.get("https://gen.pollinations.ai/account/balance")
+            .header("Authorization", format!("Bearer {}", key))
+            .send()
+            .await?;
+            
+        if resp.status().is_success() {
+            let json: serde_json::Value = resp.json().await?;
+            if let Some(balance) = json.get("balance").and_then(|b| b.as_f64()) {
+                // Map pollen balance to "day" limits for the dashboard bar
+                // We'll treat 1000 pollen as a reference "limit" if no budget is set, 
+                // or just store the balance as remaining.
+                self.db.update_provider_limits(
+                    &ProviderType::Pollinations,
+                    None,
+                    None,
+                    None, // We'll use the "day" field to store balance/remaining
+                    Some(balance as i64) 
+                ).await?;
+            }
+        }
+        Ok(())
     }
 
     pub async fn get_models(&self) -> Vec<Model> {

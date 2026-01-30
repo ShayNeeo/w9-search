@@ -41,29 +41,70 @@ pub async fn models(State(state): State<AppState>) -> Html<String> {
                     }
 
                     div class="section" {
-                        h2 { "Provider Limits" }
-                        div class="table-container" {
-                            table {
-                                thead {
-                                    tr {
-                                        th { "Provider" }
-                                        th { "Req/Min" }
-                                        th { "Req/Day" }
-                                        th { "Req/Month" }
+                        h2 { "Provider Limits & Usage" }
+                        div class="grid-container" {
+                            @for metric in &metrics {
+                                div class="metric-card" {
+                                    div class="metric-title" { (metric.provider) }
+                                    
+                                    // Daily Requests
+                                    div class="metric-row" {
+                                        span class="metric-name" { "Daily Requests Left" }
+                                        @let (used, limit, pct) = match (metric.req_day, metric.limit_day) {
+                                            (Some(u), Some(l)) if l > 0 => (u, l, ((l as f64 - u as f64) / l as f64 * 100.0).max(0.0)),
+                                            (Some(u), Some(_)) => (u, 0, 0.0),
+                                            (Some(u), None) => (u, 0, 100.0),
+                                            (None, Some(l)) => (0, l, 100.0),
+                                            (None, None) => (0, 0, 100.0),
+                                        };
+                                        div class="progress-container" {
+                                            div class="progress-bar" style=(format!("width: {}%", pct)) {}
+                                        }
+                                        div class="progress-label" {
+                                            span { 
+                                                @if limit > 0 {
+                                                    (format!("{}", limit.saturating_sub(used)))
+                                                } @else {
+                                                    "∞"
+                                                }
+                                            }
+                                            span { 
+                                                @if limit > 0 {
+                                                    (format!("Limit: {}", limit))
+                                                } @else {
+                                                    "Unlimited"
+                                                }
+                                            }
+                                        }
                                     }
-                                }
-                                tbody {
-                                    @for metric in &metrics {
-                                        tr {
-                                            td { (metric.provider) }
-                                            td { 
-                                                (format!("{}/{}", metric.req_min.unwrap_or(0), metric.limit_min.map(|l| l.to_string()).unwrap_or("∞".to_string()))) 
+
+                                    // Minute Requests (RPM)
+                                    div class="metric-row" {
+                                        span class="metric-name" { "Requests Per Minute" }
+                                        @let (used, limit, pct) = match (metric.req_min, metric.limit_min) {
+                                            (Some(u), Some(l)) if l > 0 => (u, l, ((l as f64 - u as f64) / l as f64 * 100.0).max(0.0)),
+                                            (Some(u), Some(_)) => (u, 0, 0.0),
+                                            (Some(u), None) => (u, 0, 100.0), 
+                                            (None, Some(l)) => (0, l, 100.0),
+                                            (None, None) => (0, 0, 100.0),
+                                        };
+                                        div class="progress-container" {
+                                            div class="progress-bar" style=(format!("width: {}%", pct)) {}
+                                        }
+                                        div class="progress-label" {
+                                            span { 
+                                                @if limit > 0 {
+                                                    (format!("{} left", limit.saturating_sub(used)))
+                                                } @else {
+                                                    "∞"
+                                                }
                                             }
-                                            td { 
-                                                (format!("{}/{}", metric.req_day.unwrap_or(0), metric.limit_day.map(|l| l.to_string()).unwrap_or("∞".to_string()))) 
-                                            }
-                                            td { 
-                                                (format!("{}/{}", metric.req_month.unwrap_or(0), metric.limit_month.map(|l| l.to_string()).unwrap_or("∞".to_string()))) 
+                                            span { 
+                                                @if limit > 0 {
+                                                    (format!("Limit: {}", limit))
+                                                } @else {
+                                                    "Unlimited"
+                                                }
                                             }
                                         }
                                     }
