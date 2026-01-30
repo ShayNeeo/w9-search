@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile.build
     restart: unless-stopped
     ports:
-      - "${PORT:-3000}:3000"
+      - "${PORT:-3005}:3000"
     environment:
       - DATABASE_URL=sqlite:/app/data/w9_search.db
       - SEARXNG_BASE_URL=http://searxng:8080
