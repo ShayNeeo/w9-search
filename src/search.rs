@@ -25,16 +25,36 @@ impl WebSearch {
         for result in document.select(&result_selector).take(5) {
             if let Some(title_elem) = result.select(&title_selector).next() {
                 let title = title_elem.text().collect::<String>();
-                let url = title_elem.value().attr("href")
+                let mut url = title_elem.value().attr("href")
                     .unwrap_or("")
                     .to_string();
+                
+                // Extract actual URL from DuckDuckGo redirect links
+                // DuckDuckGo wraps URLs in /l/?uddg=... format
+                if url.starts_with("/l/?uddg=") {
+                    if let Some(decoded) = url.strip_prefix("/l/?uddg=") {
+                        if let Ok(decoded_url) = urlencoding::decode(decoded) {
+                            url = decoded_url.to_string();
+                        }
+                    }
+                }
+                
+                // Normalize protocol-relative URLs
+                if url.starts_with("//") {
+                    url = format!("https:{}", url);
+                }
+                
+                // Skip if URL is still invalid or relative
+                if url.is_empty() || url.starts_with('/') || (!url.starts_with("http://") && !url.starts_with("https://")) {
+                    continue;
+                }
                 
                 let snippet = result.select(&snippet_selector)
                     .next()
                     .map(|e| e.text().collect::<String>())
                     .unwrap_or_default();
                 
-                if !url.is_empty() && !title.is_empty() {
+                if !title.is_empty() {
                     results.push(SearchResult {
                         title,
                         url,
@@ -48,12 +68,27 @@ impl WebSearch {
     }
     
     pub async fn fetch_content(url: &str) -> Result<String> {
+        // Normalize URL - handle protocol-relative URLs (starting with //)
+        let normalized_url = if url.starts_with("//") {
+            format!("https:{}", url)
+        } else if url.starts_with('/') {
+            // Relative URL, skip it
+            return Err(anyhow::anyhow!("Relative URL not supported: {}", url));
+        } else if !url.starts_with("http://") && !url.starts_with("https://") {
+            // Missing protocol, assume https
+            format!("https://{}", url)
+        } else {
+            url.to_string()
+        };
+        
+        tracing::debug!("Fetching content from: {}", normalized_url);
+        
         let client = reqwest::Client::builder()
             .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
             .timeout(std::time::Duration::from_secs(10))
             .build()?;
         
-        let html = client.get(url).send().await?.text().await?;
+        let html = client.get(&normalized_url).send().await?.text().await?;
         let document = Html::parse_document(&html);
         
         // Extract text content
