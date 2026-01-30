@@ -21,6 +21,9 @@ services:
       - w9-network
     depends_on:
       - searxng
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
 
   searxng:
     container_name: searxng
@@ -40,3 +43,4 @@ services:
 networks:
   w9-network:
     name: w9-network
+    driver: bridge
