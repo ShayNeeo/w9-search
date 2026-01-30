@@ -40,7 +40,7 @@ RUN apt-get update && apt-get install -y \
 COPY --from=builder /app/target/release/w9-search /app/w9-search
 
 # Verify binary exists and is executable
-RUN ls -la /app/w9-search && file /app/w9-search
+RUN ls -la /app/w9-search && test -x /app/w9-search
 
 # Copy static files
 COPY static ./static
