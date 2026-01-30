@@ -16,20 +16,23 @@ pub async fn handle_query(
     
     // Determine model to use
     let requested_model = request.model.clone().unwrap_or_else(|| state.default_model.clone());
-    let model = if state.models.contains(&requested_model) {
+    
+    // Verify model exists in manager
+    let model = if state.llm_manager.get_model(&requested_model).await.is_some() {
         requested_model
     } else {
         tracing::warn!(
-            "Requested model '{}' not in available models {:?}; using default '{}'",
+            "Requested model '{}' not found; using default '{}'",
             requested_model,
-            state.models,
             state.default_model
         );
         state.default_model.clone()
     };
+    
     tracing::info!("Using model '{}' for this query", model);
     
-    let rag = RAGSystem::new(state.db.clone(), state.openrouter_api_key.clone(), model);
+    // Pass llm_manager instead of api_key
+    let rag = RAGSystem::new(state.db.clone(), state.llm_manager.clone(), model);
     
     match rag.query(&request.query, request.web_search_enabled).await {
         Ok((answer, sources)) => {

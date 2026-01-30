@@ -1,0 +1,41 @@
+version: '3.7'
+
+services:
+  w9-search:
+    build:
+      context: .
+      dockerfile: Dockerfile.build
+    container_name: w9-search
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=sqlite:/app/data/w9_search.db
+      - SEARXNG_BASE_URL=http://searxng:8080
+      # Add other keys from .env here or use env_file
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    networks:
+      - w9-network
+    depends_on:
+      - searxng
+
+  searxng:
+    container_name: searxng
+    image: searxng/searxng:latest
+    restart: always
+    networks:
+      - w9-network
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - BASE_URL=http://localhost:8080/
+      - INSTANCE_NAME=w9-searxng
+
+networks:
+  w9-network:
+    name: w9-network

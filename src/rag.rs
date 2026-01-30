@@ -1,23 +1,66 @@
 use crate::search::WebSearch;
 use crate::db::Database;
 use crate::tools::Tools;
+use crate::llm::LLMManager;
 use anyhow::Result;
 use std::sync::Arc;
 use serde_json::{json, Value};
+use std::collections::HashSet;
 
 pub struct RAGSystem {
     db: Arc<Database>,
-    api_key: String,
+    llm_manager: Arc<LLMManager>,
     model: String,
 }
 
 impl RAGSystem {
-    pub fn new(db: Arc<Database>, api_key: String, model: String) -> Self {
+    pub fn new(db: Arc<Database>, llm_manager: Arc<LLMManager>, model: String) -> Self {
         Self {
             db,
-            api_key,
+            llm_manager,
             model,
         }
+    }
+
+    /// Ask the LLM to plan the research steps
+    async fn plan_search(&self, query: &str) -> Result<Vec<String>> {
+        tracing::info!("Planning search for query: {}", query);
+        
+        let system_prompt = "You are a simplified research planner. \
+        Given a user query, generate a list of 1-3 specific search queries that would help answer it. \
+        Return ONLY a JSON object with a 'queries' key containing the list of strings. \
+        Example: {\"queries\": [\"current president of US\", \"US president term length\"]}";
+
+        let messages = vec![
+            json!({ "role": "system", "content": system_prompt }),
+            json!({ "role": "user", "content": query })
+        ];
+
+        let json_resp = self.llm_manager.chat_completion(&self.model, messages, None).await?;
+        
+        // Extract content from choice
+        let content = json_resp["choices"][0]["message"]["content"]
+            .as_str()
+            .unwrap_or("{}");
+            
+        // Clean markdown code blocks if present
+        let clean_content = content.trim()
+            .trim_start_matches("```json")
+            .trim_start_matches("```")
+            .trim_end_matches("```");
+
+        if let Ok(plan) = serde_json::from_str::<Value>(clean_content) {
+            if let Some(queries) = plan["queries"].as_array() {
+                let strings: Vec<String> = queries.iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect();
+                tracing::info!("Generated search plan: {:?}", strings);
+                return Ok(strings);
+            }
+        }
+
+        // Fallback: just use the original query
+        Ok(vec![query.to_string()])
     }
     
     /// Enhance search query with temporal context for time-sensitive queries
@@ -70,23 +113,34 @@ impl RAGSystem {
         let mut context_sources = Vec::new();
         
         // Step 1: Web search if enabled
-        // Enhance search query with temporal context for time-sensitive queries
         if web_search_enabled {
-            let enhanced_query = Self::enhance_query_with_temporal_context(user_query);
-            tracing::info!("Enhanced search query: '{}'", enhanced_query);
-            
-            let search_results = match WebSearch::search(&enhanced_query).await {
-                Ok(results) => {
-                    tracing::info!("Web search returned {} results", results.len());
-                    results
-                },
+            // Get search plan
+            let search_queries = match self.plan_search(user_query).await {
+                Ok(queries) => queries,
                 Err(e) => {
-                    tracing::warn!("Web search failed: {}, continuing without web sources", e);
-                    Vec::new()
+                    tracing::warn!("Planning failed: {}, falling back to single query", e);
+                    vec![Self::enhance_query_with_temporal_context(user_query)]
                 }
             };
+
+            // Execute searches
+            let mut all_results = Vec::new();
+            let mut seen_urls = HashSet::new();
             
-            for (idx, result) in search_results.iter().take(3).enumerate() {
+            for query in search_queries {
+                tracing::info!("Executing search step: {}", query);
+                if let Ok(results) = WebSearch::search(&self.db, &query).await {
+                    for result in results {
+                        if seen_urls.insert(result.url.clone()) {
+                            all_results.push(result);
+                        }
+                    }
+                }
+            }
+            
+            // Limit and fetch content
+            // We'll take top 5 unique results across all queries
+            for (idx, result) in all_results.iter().take(5).enumerate() {
                 tracing::info!("Fetching content from result {}: {}", idx + 1, result.url);
                 match WebSearch::fetch_content(&result.url).await {
                     Ok(content) => {
@@ -118,9 +172,9 @@ impl RAGSystem {
             }
         }
         
-        // Step 2: Retrieve relevant sources from database
+        // Step 2: Retrieve relevant sources from database (always check DB too)
         tracing::info!("Searching database for relevant sources...");
-        let db_sources = match self.db.search_sources(user_query, 5).await {
+        let db_sources = match self.db.search_sources(user_query, 3).await {
             Ok(sources) => {
                 tracing::info!("Found {} relevant sources in database", sources.len());
                 sources
@@ -130,7 +184,17 @@ impl RAGSystem {
                 Vec::new()
             }
         };
-        context_sources.extend(db_sources);
+        
+        // Merge and deduplicate
+        let mut seen_ids = HashSet::new();
+        for s in &context_sources {
+            seen_ids.insert(s.id);
+        }
+        for s in db_sources {
+            if seen_ids.insert(s.id) {
+                context_sources.push(s);
+            }
+        }
         
         // Step 3: Build context
         let context = if context_sources.is_empty() {
@@ -141,7 +205,7 @@ impl RAGSystem {
                 .map(|(i, s)| {
                     format!("[Source {}]\nTitle: {}\nURL: {}\nContent: {}\n", 
                         i + 1, s.title, s.url, 
-                        s.content.chars().take(1000).collect::<String>())
+                        s.content.chars().take(2000).collect::<String>())
                 })
                 .collect::<Vec<_>>()
                 .join("\n---\n\n")
@@ -150,81 +214,32 @@ impl RAGSystem {
         // Step 4: Query AI with RAG context
         let system_prompt = if web_search_enabled {
             format!(
-                "You are a helpful AI assistant with access to real-time web sources and powerful tools.\n\n\
-                CRITICAL WORKFLOW FOR TIME-SENSITIVE QUERIES:\n\
-                1. If the question asks about 'current', 'today', 'now', 'present', or anything requiring up-to-date information:\n\
-                   - FIRST, use the get_current_date tool to get the exact current date\n\
-                   - THEN, use that date context when evaluating web sources or formulating follow-up searches\n\
-                   - Example: 'Who is the current US president?' → Get current date → Search with date context → Answer based on sources\n\
-                2. For questions about 'current' status, positions, events, or people:\n\
-                   - Always fetch the current date first to establish temporal context\n\
-                   - Use the date to determine if sources are recent enough\n\
-                   - If sources don't include the current date, note this limitation\n\n\
-                INTELLIGENT TOOL USAGE PATTERNS:\n\
+                "You are an advanced AI assistant with research capabilities.\n\
                 \n\
-                TIME-SENSITIVE QUERIES:\n\
-                - 'current', 'today', 'now', 'present', 'latest' → get_current_date FIRST\n\
-                - 'who is the current X' → get_current_date → search with date context\n\
-                - 'what happened today' → get_current_date → search for today's events\n\
-                - Age questions → get_current_date → days_between_dates\n\
+                TASK: Answer the user's query using ONLY the provided sources. \n\
                 \n\
-                MATHEMATICAL & COMPARISON QUERIES:\n\
-                - Any math expression → calculate tool\n\
-                - 'compare', 'difference between', 'larger than' → compare_values\n\
-                - 'convert X to Y' → unit_convert\n\
-                - 'format as currency/percentage' → format_number\n\
+                GUIDELINES:\n\
+                1. CITATIONS: Use [Source N] to cite information. Every fact must be cited.\n\
+                2. SYNTHESIS: Combine information from multiple sources to provide a comprehensive answer.\n\
+                3. HONESTY: If the sources do not contain the answer, state that clearly.\n\
+                4. TEMPORAL AWARENESS: Current date is {}.\n\
                 \n\
-                DATA EXTRACTION & ANALYSIS:\n\
-                - 'extract', 'find keywords', 'main topics' → extract_keywords\n\
-                - 'who/what/where mentioned' → extract_entities\n\
-                - 'validate URL', 'check link' → validate_url\n\
-                \n\
-                DATE & TIME OPERATIONS:\n\
-                - 'how many days', 'time between' → days_between_dates\n\
-                - 'format date' → format_date\n\
-                - 'convert timezone' → timezone_convert\n\
-                \n\
-                GENERAL GUIDELINES:\n\
-                - Always use tools proactively when they can provide accurate, real-time data\n\
-                - Combine multiple tools when needed (e.g., get_current_date + days_between_dates for age)\n\
-                - Use web search results ONLY - do not rely on training data for current information\n\
-                - When in doubt about current information, use get_current_date to establish context\n\n\
-                SOURCE PRIORITY:\n\
-                - CRITICAL: You MUST prioritize and rely EXCLUSIVELY on the provided web sources below\n\
-                - Do NOT use your training knowledge for current/real-time information\n\
-                - If sources don't contain enough information, say so explicitly\n\
-                - Always cite sources using [Source N] format when referencing any information\n\
-                - Base your answer STRICTLY on the provided sources, even if it contradicts your training data\n\n\
-                Web Sources (use these exclusively):\n{}",
+                SOURCES:\n{}",
+                chrono::Utc::now().format("%Y-%m-%d"),
                 context
             )
         } else {
             format!(
-                "You are a helpful AI assistant with access to stored sources and powerful tools.\n\n\
-                INTELLIGENT TOOL USAGE:\n\
+                "You are a helpful AI assistant with access to stored knowledge.\n\
                 \n\
-                TIME-SENSITIVE QUERIES:\n\
-                - 'current', 'today', 'now', 'present' → get_current_date FIRST\n\
-                - Age calculations → get_current_date + days_between_dates\n\
-                - 'how long ago' → days_between_dates\n\
+                TASK: Answer the user's query using the provided sources if relevant.\n\
                 \n\
-                MATHEMATICAL OPERATIONS:\n\
-                - Any calculation → calculate tool\n\
-                - Comparisons → compare_values\n\
-                - Unit conversions → unit_convert\n\
-                - Number formatting → format_number\n\
+                GUIDELINES:\n\
+                1. Prioritize the provided sources.\n\
+                2. If sources are insufficient, you may use your training knowledge but must clarify what is from sources vs training.\n\
+                3. Cite sources using [Source N].\n\
                 \n\
-                TEXT ANALYSIS:\n\
-                - Extract main points → extract_keywords\n\
-                - Find entities (people, places) → extract_entities\n\
-                \n\
-                GENERAL GUIDELINES:\n\
-                - Use tools proactively to get accurate, real-time data\n\
-                - Combine tools intelligently (e.g., date + calculation for age)\n\
-                - Prioritize stored sources when available\n\
-                - You may supplement with your knowledge if sources don't fully cover the question\n\
-                - Always cite sources using [Source N] format when referencing them\n\n\
-                Sources:\n{}",
+                SOURCES:\n{}",
                 context
             )
         };
@@ -244,17 +259,6 @@ impl RAGSystem {
         let tools = Tools::get_tools_definition();
         tracing::info!("Starting AI query with {} tools available", tools.len());
         
-        let mut request_json = json!({
-            "model": self.model,
-            "messages": messages,
-            "tools": tools
-        });
-        
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
-            .build()
-            .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {}", e))?;
-        
         // Handle tool calling loop (max 3 iterations)
         let mut max_iterations = 3;
         let mut final_answer = String::new();
@@ -262,45 +266,17 @@ impl RAGSystem {
         while max_iterations > 0 {
             tracing::info!("AI query iteration {} (remaining: {})", 4 - max_iterations, max_iterations - 1);
             
-            let response = match client
-                .post("https://openrouter.ai/api/v1/chat/completions")
-                .header("Authorization", format!("Bearer {}", self.api_key))
-                .header("Content-Type", "application/json")
-                .header("HTTP-Referer", "http://localhost:3000")
-                .header("X-Title", "W9 Search")
-                .json(&request_json)
-                .send()
-                .await
-            {
-                Ok(resp) => {
-                    let status = resp.status();
-                    tracing::info!("OpenRouter API response status: {}", status);
-                    if !status.is_success() {
-                        let error_text = resp.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-                        tracing::error!("OpenRouter API error ({}): {}", status, error_text);
-                        return Err(anyhow::anyhow!("OpenRouter API error: {} - {}", status, error_text));
-                    }
-                    resp
-                },
-                Err(e) => {
-                    tracing::error!("Failed to send request to OpenRouter: {}", e);
-                    return Err(anyhow::anyhow!("OpenRouter request failed: {}", e));
-                }
-            };
+            let response_json = self.llm_manager.chat_completion(
+                &self.model, 
+                messages.clone(), 
+                Some(tools.clone())
+            ).await?;
             
-            let response_json: Value = match response.json().await {
-                Ok(json) => json,
-                Err(e) => {
-                    tracing::error!("Failed to parse OpenRouter response as JSON: {}", e);
-                    return Err(anyhow::anyhow!("Failed to parse API response: {}", e));
-                }
-            };
-            
-            tracing::debug!("OpenRouter response: {}", serde_json::to_string_pretty(&response_json).unwrap_or_default());
+            tracing::debug!("Provider response: {}", serde_json::to_string_pretty(&response_json).unwrap_or_default());
             
             if let Some(choices) = response_json.get("choices").and_then(|c| c.as_array()) {
                 if choices.is_empty() {
-                    tracing::warn!("OpenRouter returned empty choices array");
+                    tracing::warn!("Provider returned empty choices array");
                     max_iterations -= 1;
                     continue;
                 }
@@ -371,13 +347,6 @@ impl RAGSystem {
                                 // Add the assistant's tool call message
                                 messages.push(message.clone());
                                 
-                                // Update request for next iteration
-                                request_json = json!({
-                                    "model": self.model,
-                                    "messages": messages,
-                                    "tools": tools
-                                });
-                                
                                 tracing::info!("Preparing next iteration with {} messages", messages.len());
                                 max_iterations -= 1;
                                 continue;
@@ -402,10 +371,10 @@ impl RAGSystem {
                     }
                 }
             } else {
-                tracing::warn!("OpenRouter response missing choices field");
+                tracing::warn!("Provider response missing choices field");
                 if let Some(error) = response_json.get("error") {
-                    tracing::error!("OpenRouter API error: {}", serde_json::to_string(error).unwrap_or_default());
-                    return Err(anyhow::anyhow!("OpenRouter API error: {}", serde_json::to_string(error).unwrap_or_default()));
+                    tracing::error!("Provider API error: {}", serde_json::to_string(error).unwrap_or_default());
+                    return Err(anyhow::anyhow!("Provider API error: {}", serde_json::to_string(error).unwrap_or_default()));
                 }
             }
             

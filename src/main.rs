@@ -1,5 +1,6 @@
 mod api;
 mod db;
+mod llm;
 mod models;
 mod rag;
 mod search;
@@ -15,13 +16,13 @@ use tower_http::cors::CorsLayer;
 use tower_http::services::ServeDir;
 
 use crate::db::Database;
+use crate::llm::LLMManager;
+use crate::search::WebSearch;
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: Arc<Database>,
-    pub openrouter_api_key: String,
-    /// List of allowed OpenRouter model IDs
-    pub models: Vec<String>,
+    pub llm_manager: Arc<LLMManager>,
     /// Default model ID (first in models)
     pub default_model: String,
 }
@@ -127,38 +128,40 @@ async fn run() -> anyhow::Result<()> {
         }
     }
     
-    let openrouter_api_key = std::env::var("OPENROUTER_API_KEY")
-        .map_err(|_| anyhow::anyhow!("OPENROUTER_API_KEY environment variable is required but not set"))?;
-    
-    tracing::info!("OpenRouter API key configured (length: {})", openrouter_api_key.len());
-
-    // Parse available models from environment
-    let models_env = std::env::var("OPENROUTER_MODELS")
-        .unwrap_or_else(|_| "tngtech/deepseek-r1t2-chimera:free,arcee-ai/trinity-large-preview:free".to_string());
-    let models: Vec<String> = models_env
-        .split(',')
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    let default_model = models
-        .get(0)
-        .cloned()
-        .unwrap_or_else(|| "tngtech/deepseek-r1t2-chimera:free".to_string());
-    tracing::info!("Available models: {:?}", models);
-    tracing::info!("Default model: {}", default_model);
-
     tracing::info!("Connecting to database...");
-    let db = Database::new(&database_url).await?;
+    let db = Arc::new(Database::new(&database_url).await?);
     tracing::info!("Database connected successfully");
     
     tracing::info!("Running database migrations...");
     db.migrate().await?;
     tracing::info!("Database migrations completed");
 
+    // Initialize LLM Manager
+    let llm_manager = Arc::new(LLMManager::new(db.clone()));
+    tracing::info!("Fetching available models...");
+    llm_manager.fetch_available_models().await?;
+    
+    // Sync Tavily usage
+    tracing::info!("Syncing Tavily usage limits...");
+    WebSearch::sync_tavily_usage(&db).await.ok();
+    
+    let models = llm_manager.get_models().await;
+    if models.is_empty() {
+        tracing::warn!("No models found available from any provider!");
+    } else {
+        tracing::info!("Loaded {} models", models.len());
+        for m in models.iter().take(5) {
+             tracing::info!("- {} ({})", m.id, m.provider);
+        }
+    }
+
+    let default_model = models.first()
+        .map(|m| m.id.clone())
+        .unwrap_or_else(|| "no-models-available".to_string());
+
     let state = AppState {
-        db: Arc::new(db),
-        openrouter_api_key,
-        models,
+        db,
+        llm_manager,
         default_model,
     };
 
