@@ -1,4 +1,4 @@
-use sqlx::sqlite::SqlitePool;
+use sqlx::sqlite::{SqlitePool, SqliteConnectOptions};
 use crate::models::Source;
 
 pub struct Database {
@@ -7,7 +7,41 @@ pub struct Database {
 
 impl Database {
     pub async fn new(database_url: &str) -> anyhow::Result<Self> {
-        let pool = SqlitePool::connect(database_url).await?;
+        // Parse the connection string and add create_if_missing option
+        let options = if database_url.starts_with("sqlite:") {
+            let path = database_url.strip_prefix("sqlite:").unwrap();
+            
+            // Resolve to absolute path for better error messages
+            let abs_path = std::path::Path::new(path)
+                .canonicalize()
+                .or_else(|_| {
+                    // If canonicalize fails, try to get absolute path
+                    std::env::current_dir()
+                        .map(|cwd| cwd.join(path))
+                        .or_else(|_| Ok(std::path::PathBuf::from(path)))
+                })?;
+            
+            tracing::info!("Connecting to SQLite database at: {:?}", abs_path);
+            
+            SqliteConnectOptions::new()
+                .filename(path)
+                .create_if_missing(true)
+        } else {
+            // Fallback to parsing the full URL
+            database_url.parse::<SqliteConnectOptions>()?
+                .create_if_missing(true)
+        };
+        
+        let pool = SqlitePool::connect_with(options)
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to connect to SQLite database: {}. \
+                    Database URL: {}. \
+                    Make sure the directory exists and is writable.",
+                    e, database_url
+                )
+            })?;
         Ok(Self { pool })
     }
 

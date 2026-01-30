@@ -49,7 +49,9 @@ async fn run() -> anyhow::Result<()> {
     
     // Ensure database directory exists if path contains directories
     if let Some(path) = database_url.strip_prefix("sqlite:") {
-        if let Some(parent) = std::path::Path::new(path).parent() {
+        let db_path = std::path::Path::new(path);
+        
+        if let Some(parent) = db_path.parent() {
             tracing::info!("Creating database directory: {:?}", parent);
             std::fs::create_dir_all(parent)?;
             
@@ -72,6 +74,14 @@ async fn run() -> anyhow::Result<()> {
                     ));
                 }
             }
+        }
+        
+        // Also try to create an empty database file to ensure the path is accessible
+        tracing::info!("Database file path: {:?}", db_path);
+        if !db_path.exists() {
+            tracing::info!("Database file does not exist, SQLite will create it");
+        } else {
+            tracing::info!("Database file already exists");
         }
     }
     
