@@ -52,5 +52,9 @@ EXPOSE 3000
 ENV RUST_LOG=info
 ENV DATABASE_URL=sqlite:/app/data/w9_search.db
 
-# Run the application
+# Ensure static directory exists
+RUN mkdir -p /app/static
+
+# Run the application with explicit error handling
+# Use exec form to ensure proper signal handling
 CMD ["./w9-search"]
