@@ -10,6 +10,8 @@ pub async fn index() -> Html<String> {
                 meta name="viewport" content="width=device-width, initial-scale=1";
                 title { "W9 Search - AI RAG" }
                 script src="https://unpkg.com/htmx.org@1.9.10" {}
+                script src="https://cdn.jsdelivr.net/npm/marked@11.1.1/marked.min.js" {}
+                script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js" {}
                 link rel="stylesheet" href="/static/style.css";
                 link rel="preconnect" href="https://fonts.googleapis.com";
                 link rel="preconnect" href="https://fonts.gstatic.com" crossorigin;
@@ -58,6 +60,71 @@ pub async fn index() -> Html<String> {
                 
                 script {
                     (maud::PreEscaped(r#"
+                    // Initialize Mermaid
+                    mermaid.initialize({ 
+                        startOnLoad: false,
+                        theme: 'dark',
+                        themeVariables: {
+                            primaryColor: '#ff6b9d',
+                            primaryTextColor: '#e0e0e0',
+                            primaryBorderColor: '#4ecdc4',
+                            lineColor: '#4ecdc4',
+                            secondaryColor: '#141414',
+                            tertiaryColor: '#0a0a0a'
+                        }
+                    });
+                    
+                    // Configure Marked for markdown rendering
+                    marked.setOptions({
+                        breaks: true,
+                        gfm: true,
+                        headerIds: true,
+                        mangle: false
+                    });
+                    
+                    function renderMarkdown(markdown) {
+                        // Render markdown to HTML
+                        const html = marked.parse(markdown);
+                        
+                        // Create a temporary container to process mermaid diagrams
+                        const tempDiv = document.createElement('div');
+                        tempDiv.innerHTML = html;
+                        
+                        // Find and process mermaid code blocks
+                        const mermaidBlocks = tempDiv.querySelectorAll('code.language-mermaid, pre code.language-mermaid');
+                        mermaidBlocks.forEach((block, index) => {
+                            const mermaidCode = block.textContent;
+                            const mermaidId = 'mermaid-' + Date.now() + '-' + index;
+                            
+                            // Create mermaid div
+                            const mermaidDiv = document.createElement('div');
+                            mermaidDiv.className = 'mermaid';
+                            mermaidDiv.id = mermaidId;
+                            mermaidDiv.textContent = mermaidCode;
+                            
+                            // Replace code block with mermaid div
+                            const pre = block.closest('pre');
+                            if (pre) {
+                                pre.parentNode.replaceChild(mermaidDiv, pre);
+                            } else {
+                                block.parentNode.replaceChild(mermaidDiv, block);
+                            }
+                        });
+                        
+                        return tempDiv.innerHTML;
+                    }
+                    
+                    function renderMermaid(container) {
+                        // Find all mermaid divs and render them
+                        const mermaidDivs = container.querySelectorAll('.mermaid');
+                        mermaidDivs.forEach((div) => {
+                            if (!div.hasAttribute('data-processed')) {
+                                mermaid.run({ nodes: [div] });
+                                div.setAttribute('data-processed', 'true');
+                            }
+                        });
+                    }
+                    
                     document.getElementById('query-form').addEventListener('submit', async (e) => {
                         e.preventDefault();
                         const query = document.getElementById('query-input').value;
@@ -78,7 +145,14 @@ pub async fn index() -> Html<String> {
                             
                             const data = await response.json();
                             
-                            answerSection.innerHTML = `<div class="answer">${data.answer.replace(/\n/g, '<br>')}</div>`;
+                            // Render markdown with mermaid support
+                            const markdownHtml = renderMarkdown(data.answer);
+                            answerSection.innerHTML = `<div class="answer markdown-body">${markdownHtml}</div>`;
+                            
+                            // Render mermaid diagrams after markdown is rendered
+                            setTimeout(() => {
+                                renderMermaid(answerSection);
+                            }, 100);
                             
                             if (data.sources && data.sources.length > 0) {
                                 const sourcesHtml = data.sources.map((s, i) => 

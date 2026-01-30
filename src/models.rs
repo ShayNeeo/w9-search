@@ -24,9 +24,36 @@ pub struct QueryResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OpenRouterMessage {
-    pub role: String,
-    pub content: String,
+#[serde(untagged)]
+pub enum OpenRouterMessage {
+    Standard {
+        role: String,
+        content: String,
+    },
+    ToolCall {
+        role: String,
+        content: Option<String>,
+        tool_calls: Vec<ToolCall>,
+    },
+    ToolResponse {
+        role: String,
+        content: String,
+        name: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCall {
+    pub id: String,
+    #[serde(rename = "type")]
+    pub call_type: String,
+    pub function: ToolFunction,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolFunction {
+    pub name: String,
+    pub arguments: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

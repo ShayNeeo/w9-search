@@ -4,6 +4,7 @@ mod models;
 mod rag;
 mod search;
 mod templates;
+mod tools;
 
 use axum::{
     routing::{get, post},
