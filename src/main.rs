@@ -43,7 +43,7 @@ async fn run() -> anyhow::Result<()> {
     tracing::info!("Starting W9 Search application...");
 
     let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "sqlite:w9_search.db".to_string());
+        .unwrap_or_else(|_| "sqlite:/app/data/w9_search.db".to_string());
     
     tracing::info!("Database URL: {}", database_url);
     
@@ -52,27 +52,32 @@ async fn run() -> anyhow::Result<()> {
         let db_path = std::path::Path::new(path);
         
         if let Some(parent) = db_path.parent() {
-            tracing::info!("Creating database directory: {:?}", parent);
-            std::fs::create_dir_all(parent)?;
-            
-            // Verify directory is writable
-            let metadata = std::fs::metadata(parent)?;
-            tracing::info!("Directory permissions: {:?}", metadata.permissions());
-            
-            // Test write access by creating a temp file
-            let test_file = parent.join(".write_test");
-            match std::fs::File::create(&test_file) {
-                Ok(_) => {
-                    std::fs::remove_file(&test_file)?;
-                    tracing::info!("Directory is writable");
+            // Only create directory if parent is not empty (i.e., path contains directories)
+            if !parent.as_os_str().is_empty() {
+                tracing::info!("Creating database directory: {:?}", parent);
+                std::fs::create_dir_all(parent)?;
+                
+                // Verify directory is writable
+                let metadata = std::fs::metadata(parent)?;
+                tracing::info!("Directory permissions: {:?}", metadata.permissions());
+                
+                // Test write access by creating a temp file
+                let test_file = parent.join(".write_test");
+                match std::fs::File::create(&test_file) {
+                    Ok(_) => {
+                        std::fs::remove_file(&test_file)?;
+                        tracing::info!("Directory is writable");
+                    }
+                    Err(e) => {
+                        return Err(anyhow::anyhow!(
+                            "Database directory {:?} is not writable: {}. \
+                            Please ensure the directory exists and has write permissions.",
+                            parent, e
+                        ));
+                    }
                 }
-                Err(e) => {
-                    return Err(anyhow::anyhow!(
-                        "Database directory {:?} is not writable: {}. \
-                        Please ensure the directory exists and has write permissions.",
-                        parent, e
-                    ));
-                }
+            } else {
+                tracing::info!("Database file is in current directory, no parent directory to create");
             }
         }
         
