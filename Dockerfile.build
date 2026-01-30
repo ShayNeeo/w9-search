@@ -1,5 +1,5 @@
 # Build stage
-FROM rust:1.75-slim as builder
+FROM rust:1.82-slim as builder
 
 WORKDIR /app
 
@@ -10,12 +10,13 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy manifests first (for better caching)
-COPY Cargo.toml Cargo.lock* ./
+COPY Cargo.toml ./
 
 # Create a dummy src to build dependencies
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 
 # Build dependencies (this layer will be cached)
+# Note: We don't copy Cargo.lock to avoid version conflicts
 RUN cargo build --release && rm src/main.rs
 
 # Copy source code
