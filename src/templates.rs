@@ -13,7 +13,7 @@ pub async fn index() -> Html<String> {
                 link rel="stylesheet" href="/static/style.css";
                 link rel="preconnect" href="https://fonts.googleapis.com";
                 link rel="preconnect" href="https://fonts.gstatic.com" crossorigin;
-                link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Space+Grotesk:wght@300;400;700&display=swap" rel="stylesheet";
+                link href=(r#"https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Space+Grotesk:wght@300;400;700&display=swap"#) rel="stylesheet";
             }
             body {
                 div class="container" {
@@ -57,7 +57,7 @@ pub async fn index() -> Html<String> {
                 }
                 
                 script {
-                    r#"
+                    (maud::PreEscaped(r#"
                     document.getElementById('query-form').addEventListener('submit', async (e) => {
                         e.preventDefault();
                         const query = document.getElementById('query-input').value;
@@ -96,7 +96,7 @@ pub async fn index() -> Html<String> {
                             answerSection.innerHTML = `<div class="error">Error: ${error.message}</div>`;
                         }
                     });
-                    "#
+                    "#))
                 }
             }
         }
