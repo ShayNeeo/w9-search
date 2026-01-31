@@ -257,6 +257,9 @@ impl SearchProvider for SearXNGSearch {
         let response = client
             .get(&url)
             .query(&[("q", query), ("format", "json")])
+            // Add headers to satisfy SearXNG bot detection
+            .header("X-Forwarded-For", "127.0.0.1") 
+            .header("User-Agent", "w9-search/1.0")
             .send()
             .await?;
 

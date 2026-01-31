@@ -46,6 +46,10 @@ RUN ls -la /app/w9-search && test -x /app/w9-search
 # Copy static files
 COPY static ./static
 
+# Copy entrypoint script
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
 # Create directory for database with proper permissions
 # Note: If using Dokploy volume mounts, ensure the mounted volume is writable
 RUN mkdir -p /app/data && chmod 755 /app/data
@@ -61,7 +65,5 @@ ENV PORT=3005
 ENV RUST_LOG=info
 ENV DATABASE_URL=sqlite:/app/data/w9_search.db
 
-# Run the application with explicit error handling
-# Use exec form to ensure proper signal handling
-# Also ensure stderr/stdout are unbuffered for immediate log visibility
-CMD ["/app/w9-search"]
+# Run the application using the entrypoint script
+CMD ["/app/entrypoint.sh", "/app/w9-search"]
