@@ -133,8 +133,23 @@ async fn run() -> anyhow::Result<()> {
     tracing::info!("Database connected successfully");
     
     tracing::info!("Running database migrations...");
-    db.migrate().await?;
-    tracing::info!("Database migrations completed");
+    let mut retry_count = 0;
+    while retry_count < 5 {
+        match db.migrate().await {
+            Ok(_) => {
+                tracing::info!("Database migrations completed");
+                break;
+            },
+            Err(e) => {
+                retry_count += 1;
+                tracing::warn!("Migration failed (attempt {}/5): {}", retry_count, e);
+                if retry_count >= 5 {
+                    return Err(e);
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+        }
+    }
 
     // Initialize LLM Manager
     let llm_manager = Arc::new(LLMManager::new(db.clone()));

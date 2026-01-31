@@ -10,5 +10,5 @@ env:
 healthcheck:
   path: /health
   interval: 30s
-  timeout: 10s
-  retries: 3
+  timeout: 30s
+  retries: 5
