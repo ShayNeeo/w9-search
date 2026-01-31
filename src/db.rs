@@ -59,6 +59,22 @@ impl Database {
                 last_reset_day DATETIME,
                 last_reset_month DATETIME
             );
+
+            CREATE TABLE IF NOT EXISTS threads (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                thread_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(thread_id) REFERENCES threads(id) ON DELETE CASCADE
+            );
             "#,
         )
         .execute(&self.pool)
@@ -70,6 +86,66 @@ impl Database {
         let _ = sqlx::query("ALTER TABLE provider_metrics ADD COLUMN limit_month INTEGER").execute(&self.pool).await;
 
         Ok(())
+    }
+
+    pub async fn create_thread(&self, title: &str) -> anyhow::Result<String> {
+        let id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO threads (id, title) VALUES (?, ?)"
+        )
+        .bind(&id)
+        .bind(title)
+        .execute(&self.pool)
+        .await?;
+        Ok(id)
+    }
+
+    pub async fn get_thread(&self, id: &str) -> anyhow::Result<Option<crate::models::Thread>> {
+        let thread = sqlx::query_as::<_, crate::models::Thread>(
+            "SELECT id, title, created_at, updated_at FROM threads WHERE id = ?"
+        )
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(thread)
+    }
+
+    pub async fn list_threads(&self, limit: i64) -> anyhow::Result<Vec<crate::models::Thread>> {
+        let threads = sqlx::query_as::<_, crate::models::Thread>(
+            "SELECT id, title, created_at, updated_at FROM threads ORDER BY updated_at DESC LIMIT ?"
+        )
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(threads)
+    }
+
+    pub async fn add_message(&self, thread_id: &str, role: &str, content: &str) -> anyhow::Result<i64> {
+        // Update thread updated_at
+        sqlx::query("UPDATE threads SET updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+            .bind(thread_id)
+            .execute(&self.pool)
+            .await?;
+
+        let id = sqlx::query_scalar::<_, i64>(
+            "INSERT INTO messages (thread_id, role, content) VALUES (?, ?, ?) RETURNING id"
+        )
+        .bind(thread_id)
+        .bind(role)
+        .bind(content)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(id)
+    }
+
+    pub async fn get_thread_messages(&self, thread_id: &str) -> anyhow::Result<Vec<crate::models::Message>> {
+        let messages = sqlx::query_as::<_, crate::models::Message>(
+            "SELECT id, thread_id, role, content, created_at FROM messages WHERE thread_id = ? ORDER BY created_at ASC"
+        )
+        .bind(thread_id)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(messages)
     }
 
     pub async fn insert_source(&self, url: &str, title: &str, content: &str) -> anyhow::Result<i64> {

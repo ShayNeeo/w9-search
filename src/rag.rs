@@ -131,9 +131,10 @@ impl RAGSystem {
         &self, 
         user_query: &str, 
         web_search_enabled: bool,
+        history: Vec<crate::models::Message>,
         status_sender: Option<Sender<Result<StreamEvent, anyhow::Error>>>
     ) -> Result<(String, Vec<crate::models::Source>)> {
-        tracing::info!("Starting RAG query: '{}' (web_search: {})", user_query, web_search_enabled);
+        tracing::info!("Starting RAG query: '{}' (web_search: {}, history: {})", user_query, web_search_enabled, history.len());
         self.send_status(&status_sender, "Initializing search...").await;
         
         let mut context_sources = Vec::new();
@@ -290,12 +291,21 @@ impl RAGSystem {
             json!({
                 "role": "system",
                 "content": system_prompt
-            }),
-            json!({
-                "role": "user",
-                "content": user_query
-            }),
+            })
         ];
+        
+        // Append history (limit to last 6 messages to save context)
+        for msg in history.iter().rev().take(6).rev() {
+            messages.push(json!({
+                "role": msg.role,
+                "content": msg.content
+            }));
+        }
+        
+        messages.push(json!({
+            "role": "user",
+            "content": user_query
+        }));
         
         // Get tools definition
         let tools = Tools::get_tools_definition();

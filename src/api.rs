@@ -21,17 +21,52 @@ pub async fn handle_query_stream(
     Json(request): Json<QueryRequest>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     tracing::info!(
-        "Received streaming query: '{}' (web_search: {}, model: {:?})",
+        "Received streaming query: '{}' (web_search: {}, model: {:?}, thread: {:?})",
         request.query,
         request.web_search_enabled,
-        request.model
+        request.model,
+        request.thread_id
     );
 
     let (tx, rx) = mpsc::channel(100);
     
     // Spawn background task to run the query
     tokio::spawn(async move {
-        // Determine model to use
+        // 1. Thread Management
+        let thread_id = match request.thread_id {
+            Some(id) => id,
+            None => {
+                match state.db.create_thread(&request.query).await {
+                    Ok(id) => {
+                        let _ = tx.send(Ok(StreamEvent::Status(format!("Created new thread: {}", id)))).await;
+                        // Send thread ID to client so it can update URL
+                        // We'll define a new event type for this later or just use Status/a specific event
+                        let _ = tx.send(Ok(StreamEvent::Status(format!("THREAD_ID:{}", id)))).await;
+                        id
+                    },
+                    Err(e) => {
+                        let _ = tx.send(Ok(StreamEvent::Error(format!("Failed to create thread: {}", e)))).await;
+                        return;
+                    }
+                }
+            }
+        };
+
+        // 2. Fetch History
+        let history = match state.db.get_thread_messages(&thread_id).await {
+            Ok(msgs) => msgs,
+            Err(e) => {
+                tracing::warn!("Failed to fetch history: {}", e);
+                Vec::new()
+            }
+        };
+
+        // 3. Save User Message
+        if let Err(e) = state.db.add_message(&thread_id, "user", &request.query).await {
+             tracing::error!("Failed to save user message: {}", e);
+        }
+
+        // 4. Model Selection
         let requested_model = request.model.clone().unwrap_or_else(|| "auto".to_string());
         
         let model = if requested_model == "auto" {
@@ -77,9 +112,14 @@ pub async fn handle_query_stream(
 
         let rag = RAGSystem::new(state.db.clone(), state.llm_manager.clone(), model, search_provider);
         
-        match rag.query(&request.query, request.web_search_enabled, Some(tx.clone())).await {
+        // 5. Execute RAG with history
+        match rag.query(&request.query, request.web_search_enabled, history, Some(tx.clone())).await {
             Ok((answer, _)) => {
-                let _ = tx.send(Ok(StreamEvent::Answer(answer))).await;
+                let _ = tx.send(Ok(StreamEvent::Answer(answer.clone()))).await;
+                // 6. Save Assistant Message
+                if let Err(e) = state.db.add_message(&thread_id, "assistant", &answer).await {
+                    tracing::error!("Failed to save assistant message: {}", e);
+                }
             }
             Err(e) => {
                 tracing::error!("Query error: {}", e);
@@ -109,50 +149,42 @@ pub async fn handle_query(
     State(state): State<AppState>,
     Json(request): Json<QueryRequest>,
 ) -> Result<Json<QueryResponse>, impl IntoResponse> {
-    tracing::info!(
-        "Received query: '{}' (web_search: {}, model: {:?})",
-        request.query,
-        request.web_search_enabled,
-        request.model
-    );
+    // Non-streaming endpoint (legacy support, simplified)
+    tracing::info!("Received query: '{}'", request.query);
     
-    // Determine model to use
     let requested_model = request.model.clone().unwrap_or_else(|| state.default_model.clone());
-    
-    // Verify model exists in manager
     let model = if state.llm_manager.get_model(&requested_model).await.is_some() {
         requested_model
     } else {
-        tracing::warn!(
-            "Requested model '{}' not found; using default '{}'",
-            requested_model,
-            state.default_model
-        );
         state.default_model.clone()
     };
     
-    let search_provider = request.search_provider
-        .filter(|s| s != "auto");
-
-    tracing::info!("Using model '{}' and search provider '{:?}' for this query", model, search_provider);
-    
-    // Pass llm_manager instead of api_key
+    let search_provider = request.search_provider.filter(|s| s != "auto");
     let rag = RAGSystem::new(state.db.clone(), state.llm_manager.clone(), model, search_provider);
     
-    match rag.query(&request.query, request.web_search_enabled, None).await {
-        Ok((answer, sources)) => {
-            tracing::info!("Query successful, answer length: {}, sources: {}", answer.len(), sources.len());
-            Ok(Json(QueryResponse { answer, sources }))
-        }
-        Err(e) => {
-            tracing::error!("Query error: {}", e);
-            tracing::error!("Error chain: {:?}", e);
-            eprintln!("Query error: {}", e);
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Error: {}", e),
-            ))
-        }
+    // For simple query, we don't support history yet
+    match rag.query(&request.query, request.web_search_enabled, Vec::new(), None).await {
+        Ok((answer, sources)) => Ok(Json(QueryResponse { answer, sources })),
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Error: {}", e))),
+    }
+}
+
+pub async fn get_threads(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<crate::models::Thread>>, impl IntoResponse> {
+    match state.db.list_threads(50).await {
+        Ok(threads) => Ok(Json(threads)),
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Error: {}", e))),
+    }
+}
+
+pub async fn get_thread_messages(
+    State(state): State<AppState>,
+    axum::extract::Path(thread_id): axum::extract::Path<String>,
+) -> Result<Json<Vec<crate::models::Message>>, impl IntoResponse> {
+    match state.db.get_thread_messages(&thread_id).await {
+        Ok(messages) => Ok(Json(messages)),
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Error: {}", e))),
     }
 }
 

@@ -190,6 +190,8 @@ async fn run() -> anyhow::Result<()> {
         .route("/api/query/stream", post(api::handle_query_stream))
         .route("/api/sources", get(api::get_sources))
         .route("/api/sync", post(api::sync_limits))
+        .route("/api/threads", get(api::get_threads))
+        .route("/api/threads/:id/messages", get(api::get_thread_messages))
         .nest_service("/static", ServeDir::new("static"))
         .layer(CorsLayer::permissive())
         .with_state(state);

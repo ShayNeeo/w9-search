@@ -241,8 +241,18 @@ impl SearchProvider for SearXNGSearch {
     }
 
     async fn search(&self, _db: &Database, query: &str) -> Result<Vec<SearchResult>> {
-        let client = reqwest::Client::new();
-        let url = format!("{}/search", self.base_url.trim_end_matches('/'));
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()?;
+            
+        let base = self.base_url.trim_end_matches('/');
+        let url = if base.ends_with("/search") {
+            base.to_string()
+        } else {
+            format!("{}/search", base)
+        };
+        
+        tracing::debug!("SearXNG URL: {}", url);
         
         let response = client
             .get(&url)
@@ -251,10 +261,19 @@ impl SearchProvider for SearXNGSearch {
             .await?;
 
         if !response.status().is_success() {
-            return Err(anyhow::anyhow!("SearXNG API error: {}", response.status()));
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            tracing::warn!("SearXNG API error: {} - Body: {}", status, text);
+            return Err(anyhow::anyhow!("SearXNG API error: {}", status));
         }
 
-        let searx_resp: SearXNGResponse = response.json().await?;
+        let text = response.text().await?;
+        tracing::debug!("SearXNG response: {}", text.chars().take(200).collect::<String>());
+        
+        let searx_resp: SearXNGResponse = serde_json::from_str(&text).map_err(|e| {
+            tracing::error!("Failed to parse SearXNG response: {}", e);
+            e
+        })?;
 
         let results = searx_resp.results.into_iter().map(|r| SearchResult {
             title: r.title,
@@ -382,9 +401,8 @@ impl WebSearch {
         let html = client.get(&normalized_url).send().await?.text().await?;
         let document = Html::parse_document(&html);
         
-        // Remove unwanted elements logic replaced by positive selection
-        // Strategy: Look for the <main>, <article>, or fall back to body.
-        let main_selectors = ["article", "main", "#content", ".content", "body"];
+        // Positive selection: Look for article-like containers
+        let main_selectors = ["article", "main", "#content", ".content", "#main", ".main", "body"];
         let mut best_root = document.root_element();
         
         for selector_str in main_selectors {
@@ -396,44 +414,66 @@ impl WebSearch {
             }
         }
 
-        // We will traverse and collect text, skipping blacklisted tags
-        // This is a manual traversal to avoid including script/style text
-        // scraper doesn't provide a direct "text without hidden/script" easily.
+        // Extraction Heuristics
+        // We look for P tags and other text blocks.
+        // We score them: +1 for text length, -1 for link density.
         
-        let mut content = String::new();
-        // unwanted_selectors was unused, logic changed to positive selection
+        let p_selector = Selector::parse("p, h1, h2, h3, h4, h5, h6, li, blockquote, div").unwrap();
+        let link_selector = Selector::parse("a").unwrap();
         
-        // Very basic text extraction that tries to avoid noise
-        // A robust solution would use the `readability` crate.
-        // Here we just grab paragraphs from the "best root"
-        
-        let p_selector = Selector::parse("p, h1, h2, h3, h4, li, blockquote").unwrap();
+        let mut extracted_blocks = Vec::new();
         
         for element in best_root.select(&p_selector) {
-            // Check if this element is inside an unwanted element (simplified check)
-            // Ideally we check ancestors.
+            let text = element.text().collect::<String>();
+            let text_len = text.len();
             
-            let text = element.text().collect::<String>().trim().to_string();
-            if text.len() > 20 { // Filter out short noise
-                content.push_str(&text);
-                content.push_str("\n\n");
+            // Skip very short blocks
+            if text_len < 30 { continue; }
+            
+            // Calculate link density
+            let mut link_text_len = 0;
+            for link in element.select(&link_selector) {
+                link_text_len += link.text().collect::<String>().len();
             }
+            
+            let link_density = if text_len > 0 {
+                link_text_len as f64 / text_len as f64
+            } else {
+                1.0
+            };
+            
+            // Heuristic: If > 50% of the text is links, it's likely a navbar or footer list
+            if link_density > 0.5 { continue; }
+            
+            // Heuristic: Check for class names that indicate noise
+            if let Some(class_attr) = element.value().attr("class") {
+                let lower = class_attr.to_lowercase();
+                if lower.contains("menu") || lower.contains("nav") || lower.contains("footer") || lower.contains("copyright") {
+                    continue;
+                }
+            }
+
+            extracted_blocks.push(text.trim().to_string());
         }
 
-        // Fallback to naive text if empty
-        if content.is_empty() {
-            content = best_root.text().collect::<String>();
+        // Fallback: If we got nothing, try raw text from body
+        if extracted_blocks.is_empty() {
+             let body_text = best_root.text().collect::<String>();
+             if body_text.len() > 100 {
+                 extracted_blocks.push(body_text);
+             }
         }
         
-        // Clean up whitespace
-        let mut content = content.lines()
-            .map(|l| l.trim())
-            .filter(|l| !l.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        if content.len() > 10000 {
-            content.truncate(10000);
+        // Join and clean
+        let mut content = extracted_blocks.join("\n\n");
+        
+        // Limit length safely
+        if content.len() > 15000 {
+            let mut limit = 15000;
+            while !content.is_char_boundary(limit) {
+                limit -= 1;
+            }
+            content.truncate(limit);
         }
         
         Ok(content)

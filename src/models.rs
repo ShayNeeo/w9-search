@@ -21,6 +21,8 @@ pub struct QueryRequest {
     /// Optional search provider to use. If None or "auto", automatic selection is used.
     #[serde(default)]
     pub search_provider: Option<String>,
+    #[serde(default)]
+    pub thread_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
@@ -89,4 +91,26 @@ pub struct OpenRouterResponse {
 pub struct OpenRouterChoice {
     pub message: OpenRouterMessage,
     pub finish_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Thread {
+    pub id: String,
+    pub title: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Message {
+    pub id: i64,
+    pub thread_id: String,
+    pub role: String,
+    pub content: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreateThreadRequest {
+    pub title: Option<String>,
 }
